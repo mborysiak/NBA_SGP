@@ -189,6 +189,7 @@ props = nba_scrape.nba_props_dk()
 props_df = nba_scrape.dict_to_df(props)
 props_df['game_date'] = dt.datetime.now().date()
 props_df.player = props_df.player.apply(dc.name_clean)
+props_df.head(10)
 
 # %%
 dm.delete_from_db('Player_Stats', 'Draftkings_Odds', f"game_date='{dt.datetime.now().date()}'", create_backup=False)
@@ -197,9 +198,16 @@ dm.write_to_db(props_df, 'Player_Stats', 'Draftkings_Odds', 'append')
 
 #%%
 
+def name_extract(col):
+    col = col.split(' ')
+    col = [c for c in col if c!='']
+    return ' '.join(col[2:4])
+
 df = pd.read_html('https://www.numberfire.com/nba/daily-fantasy/daily-basketball-projections')[3]
 df.columns = [c[1] for c in df.columns]
-df.Player = df.Player.apply(lambda x: ' '.join(x.split(' ')[2:4]))
+df.Player = df.Player.apply(dc.name_clean)
+df.Player = df.Player.apply(name_extract)
+df.Player = df.Player.apply(dc.name_clean)
 
 df = df.rename(columns={'Player': 'player',
                         'FP': 'fantasy_points',
@@ -215,7 +223,7 @@ df = df.rename(columns={'Player': 'player',
                         '3PM': 'three_pointers'})
 
 df['game_date'] = dt.datetime.now().date()
-df.player = df.player.apply(dc.name_clean)
+df.head(15)
 
 # %%
 dm.delete_from_db('Player_Stats', 'NumberFire_Projections', f"game_date='{dt.datetime.now().date()}'", create_backup=False)
@@ -225,7 +233,7 @@ dm.write_to_db(df, 'Player_Stats', 'NumberFire_Projections', 'append')
 #%%
 import os
 today_month = dt.datetime.now().month
-today_day = dt.datetime.now().day
+today_day = str(dt.datetime.now().day).zfill(2)
 fname = f'FantasyPros_NBA_Daily_Fantasy_Basketball_Projections_({today_month}_{today_day})_.csv'
 
 try: os.replace(f"/Users/mborysia/Downloads/{fname}", 
@@ -241,8 +249,48 @@ df['game_date'] = dt.datetime.now().date()
 df.player = df.player.apply(dc.name_clean)
 df.team = df.team.apply(lambda x: x.lstrip().rstrip())
 
-# dm.delete_from_db('Player_Stats', 'FantasyPros', f"game_date='{dt.datetime.now().date()}'", create_backup=False)
-dm.write_to_db(df, 'Player_Stats', 'FantasyPros', if_exist='replace')
+dm.delete_from_db('Player_Stats', 'FantasyPros', f"game_date='{dt.datetime.now().date()}'", create_backup=False)
+dm.write_to_db(df, 'Player_Stats', 'FantasyPros', if_exist='append')
+
+#%%
+fname = 'fantasy-basketball-projections.csv'
+
+today_date = dt.datetime.now().date()
+date_str = today_date.strftime('%Y%m%d')
+try: os.replace(f"/Users/mborysia/Downloads/{fname}", 
+                f"{root_path}/Data/OtherData/FantasyData/{date_str}_{fname}")
+except: pass
+
+df = pd.read_csv(f"{root_path}/Data/OtherData/FantasyData/{date_str}_{fname}").dropna(axis=0)
+
+df = df.rename(columns={'Name': 'player',
+                        'Rank': 'rank',
+                        'Team': 'team',
+                        'Position': 'position',
+                        'Opponent': 'opponent',
+                        'Points': 'points',
+                        'Rebounds': 'rebounds',
+                        'Assists': 'assists',
+                        'Steals': 'steals',
+                        'BlockedShots': 'blocks',
+                        'FieldGoalsPercentage': 'fg_pct',
+                        'FreeThrowsPercentage': 'ft_pct',
+                        'ThreePointersPercentage': 'three_point_pct',
+                        'FreeThrowsMade': 'ft_made',
+                        'TwoPointersMade': 'two_point_made',
+                        'ThreePointersMade': 'three_pointers',
+                        'Turnovers': 'turnovers',
+                        'Minutes': 'minutes',
+                        'FantasyPoints': 'fantasy_points'})
+
+df['game_date'] = today_date
+
+df.player = df.player.apply(dc.name_clean)
+df.team = df.team.apply(lambda x: x.lstrip().rstrip())
+df[['fg_pct', 'ft_pct']] = df[['fg_pct', 'ft_pct']] / 100
+
+dm.delete_from_db('Player_Stats', 'FantasyData', f"game_date='{today_date}'", create_backup=False)
+dm.write_to_db(df, 'Player_Stats', 'FantasyData', if_exist='append')
 
 #%%
 
@@ -327,31 +375,27 @@ class NBAStats:
 
         return players.reset_index(drop=True), teams.reset_index(drop=True)
 
-# for i in range(1, 29):
-#     today_date = f'2023-01-{str(i).zfill(2)}'
-#     try:
 
-for i in range (2, 22):
-    today_date = f'2023-01-{str(i).zfill(2)}'
 
-    nba_stats = NBAStats(today_date)
+yesterday_date = dt.datetime.now().date()-dt.timedelta(1)
 
-    box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score')
-    tracking_players, tracking_teams = nba_stats.pull_all_stats('tracking_data')
-    adv_players, adv_teams = nba_stats.pull_all_stats('advanced_stats')
+nba_stats = NBAStats(yesterday_date.strftime('%Y-%m-%d'))
 
-    dfs = [box_score_players, tracking_players, adv_players]
-    tnames = ['Box_Score', 'Tracking_Data', 'Advanced_Stats']
-    for df, tname in zip(dfs, tnames):
-        dm.delete_from_db('Player_Stats', tname, f"game_date='{today_date}'")
-        dm.write_to_db(df, 'Player_Stats', tname, 'replace')
+box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score')
+tracking_players, tracking_teams = nba_stats.pull_all_stats('tracking_data')
+adv_players, adv_teams = nba_stats.pull_all_stats('advanced_stats')
 
-    dfs = [box_score_teams, tracking_teams, adv_teams]
-    tnames = ['Box_Score', 'Tracking_Data', 'Advanced_Stats']
-    for df, tname in zip(dfs, tnames):
-        dm.delete_from_db('Team_Stats', tname, f"game_date='{today_date}'")
-        dm.write_to_db(df, 'Team_Stats', tname, 'replace')
-    # except:
-    #     print(i, 'failed')
+dfs = [box_score_players, tracking_players, adv_players]
+tnames = ['Box_Score', 'Tracking_Data', 'Advanced_Stats']
+for df, tname in zip(dfs, tnames):
+    dm.delete_from_db('Player_Stats', tname, f"game_date='{yesterday_date}'")
+    dm.write_to_db(df, 'Player_Stats', tname, 'append')
+
+dfs = [box_score_teams, tracking_teams, adv_teams]
+tnames = ['Box_Score', 'Tracking_Data', 'Advanced_Stats']
+for df, tname in zip(dfs, tnames):
+    dm.delete_from_db('Team_Stats', tname, f"game_date='{yesterday_date}'")
+    dm.write_to_db(df, 'Team_Stats', tname, 'append')
+
 # %%
 # %%

@@ -559,47 +559,106 @@ def proj_market_share(df, proj_col_name):
 
 
 #%%
+
+def cleanup_minutes(df):
+    df = df.dropna(subset=['MIN']).reset_index(drop=True)
+    df.MIN = df.MIN.apply(lambda x: float(x.split(':')[0]) + float(x.split(':')[1])/60)
+    return df
+
+def get_box_score():
+    bs = dm.read("SELECT * FROM Box_Score", 'Player_Stats')
+    bs = bs.rename(columns={'PLAYER_NAME': 'player',
+                            'PTS': 'points',
+                            'REB': 'rebounds',
+                            'AST': 'assists',
+                            'STL': 'steals',
+                            'BLK': 'blocks',
+                            'FG3M': 'three_pointers' })
+
+    bs = bs.drop(['GAME_ID', 'TEAM_ABBREVIATION', 'TEAM_ID', 'TEAM_CITY', 'PLAYER_ID', 
+                  'NICKNAME', 'START_POSITION', 'COMMENT'], axis=1)
+    bs = cleanup_minutes(bs)
+    bs = bs.sort_values(by=['player', 'game_date']).reset_index(drop=True)
+
+    return bs
+
+
+def add_y_act(df, bs):
+
+    y_act = bs[['player', 'game_date', 'points', 'rebounds', 'assists', 'three_pointers', 'steals', 'blocks']].copy()
+    y_act.columns = ['y_act_' + c if c not in ('player', 'game_date') else c for c in y_act.columns]
+    df = pd.merge(df, y_act, on=['player', 'game_date'], how='left')
+
+    return df
+
+def box_score_rolling(bs):
+
+    r_cols = [c for c in bs.columns if c not in ('player', 'team', 'game_date')]
+    bs = add_rolling_stats(bs, gcols=['player'], rcols=r_cols)
+    bs = bs.drop(['MIN', 'FGM', 'FGA', 'FG_PCT', 'three_pointers',
+                  'FG3A', 'FG3_PCT', 'FTM', 'FTA', 'FT_PCT', 'OREB', 'DREB', 'rebounds',
+                  'assists', 'steals', 'blocks', 'TO', 'PF', 'points', 'PLUS_MINUS'], axis=1)
+    bs.game_date = bs.groupby('player')['game_date'].shift(-1)
+    bs = bs.fillna({'game_date': max_date})
+
+    return bs
+
+def add_advanced_stats(df):
+    adv = dm.read("SELECT * FROM Advanced_Stats", 'Player_Stats')
+    adv = adv.rename(columns={'PLAYER_NAME': 'player'})
+
+    adv = adv.drop(['GAME_ID', 'TEAM_ABBREVIATION', 'MIN', 'TEAM_ID', 'TEAM_CITY', 
+                    'PLAYER_ID', 'NICKNAME', 'START_POSITION', 'COMMENT'], axis=1)
+    adv = adv.sort_values(by=['player', 'game_date']).reset_index(drop=True)
+
+    r_cols = [c for c in adv.columns if c not in ('player', 'game_date')]
+    adv = add_rolling_stats(adv, gcols=['player'], rcols=r_cols)
+
+    adv = adv.drop(['E_OFF_RATING', 'OFF_RATING', 'E_DEF_RATING', 'DEF_RATING',
+                  'E_NET_RATING', 'NET_RATING', 'AST_PCT', 'AST_TOV', 'AST_RATIO',
+                  'OREB_PCT', 'DREB_PCT', 'REB_PCT', 'TM_TOV_PCT', 'EFG_PCT', 'TS_PCT',
+                  'USG_PCT', 'E_USG_PCT', 'E_PACE', 'PACE', 'PACE_PER40', 'POSS', 'PIE',
+                  ], axis=1)
+    
+    adv.game_date = adv.groupby('player')['game_date'].shift(-1)
+    adv = adv.fillna({'game_date': max_date})
+    df = pd.merge(df, adv, on=['player', 'game_date'], how='left')
+
+    return df
+
+#%%
+
+max_date = dm.read("SELECT max(game_date) FROM FantasyData", 'Player_Stats').values[0][0]
+
 df = fantasy_data()
 df = fantasy_pros(df)
 df = numberfire(df)
 df= consensus_fill(df)
 df = forward_fill(df)
 df = df.dropna().reset_index(drop=True)
-df = df[df.avg_proj_points!=0].reset_index(drop=True)
-# df = rolling_proj_stats(df)
+df = df[(df.fd_points>0) & (df.fp_points>0) & (df.nf_points>0)].reset_index(drop=True)
+df = rolling_proj_stats(df)
 
-#%%
+# get box score stats and join to filter to players with minutes played
+box_score = get_box_score()
+df = pd.merge(df, box_score.loc[box_score.MIN>0, ['player', 'game_date', 'MIN']], on=['player', 'game_date'], how='left')
+df = df[(df.game_date==max_date) | ~(df.MIN.isnull())]
 
-bs = dm.read("SELECT * FROM Box_Score", 'Player_Stats')
-bs = bs.rename(columns={'TEAM_ABBREVIATION': 'team',
-                        'PLAYER_NAME': 'player',
-                        'PTS': 'points',
-                        'REB': 'rebounds',
-                        'AST': 'assists',
-                        'STL': 'steals',
-                        'BLK': 'blocks',
-                        'FG3M': 'three_pointers' })
-bs = bs.drop(['GAME_ID', 'TEAM_ID', 'TEAM_CITY', 'PLAYER_ID', 'NICKNAME', 'START_POSITION', 'COMMENT'], axis=1)
-bs = bs.dropna(subset=['MIN']).reset_index(drop=True)
-bs.MIN = bs.MIN.apply(lambda x: float(x.split(':')[0]) + float(x.split(':')[1])/60)
-bs = bs.sort_values(by=['player', 'game_date']).reset_index(drop=True)
+# roll the box score stats and shift back a game
+box_score_roll = box_score_rolling(box_score)
+df = pd.merge(df, box_score_roll, on=['player', 'game_date'])
 
-y_act = bs[['player', 'game_date', 'points', 'rebounds', 'assists', 'three_pointers', 'steals', 'blocks']].copy()
-y_act.columns = ['y_act_' + c if c not in ('player', 'game_date') else c for c in y_act.columns]
-df = pd.merge(df, y_act, on=['player', 'game_date'], how='left')
-
-
-r_cols = [c for c in bs.columns if c not in ('player', 'team', 'game_date')]
-bs = add_rolling_stats(bs, gcols=['player'], rcols=r_cols)
-bs = bs.drop(['MIN', 'FGM', 'FGA', 'FG_PCT', 'three_pointers', 'team',
-              'FG3A', 'FG3_PCT', 'FTM', 'FTA', 'FT_PCT', 'OREB', 'DREB', 'rebounds',
-              'assists', 'steals', 'blocks', 'TO', 'PF', 'points', 'PLUS_MINUS'], axis=1)
-bs.game_date = bs.groupby('player')['game_date'].shift(-1)
-bs = bs.fillna({'game_date': dt.datetime.now().date()})
-df = pd.merge(df, bs, on=['player', 'game_date'], how='left')
+df = add_advanced_stats(df)
+df = forward_fill(df)
+df = add_y_act(df, box_score)
+df = df.dropna(axis=0, subset=[c for c in df.columns if 'y_act' not in c]).reset_index(drop=True)
 
 #%%
 
 dm.write_to_db(df.iloc[:,:2000], 'Model_Features', 'Model_Data', if_exist='replace')
 if df.shape[1] > 2000:
-    dm.write_to_db(df.iloc[:,2000:], 'Model_Features', 'Model_Data2", if_exist='replace')
+    dm.write_to_db(df.iloc[:,2000:], 'Model_Features', 'Model_Data2', if_exist='replace')
+
+# %%
+
+# %%

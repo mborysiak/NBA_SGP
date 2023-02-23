@@ -199,13 +199,15 @@ dm.write_to_db(props_df, 'Player_Stats', 'Draftkings_Odds', 'append')
 #%%
 
 def name_extract(col):
+    characters = ['III', 'II', '.', 'Jr', 'Sr']
+    for c in characters:
+        col = col.replace(c, '')
     col = col.split(' ')
     col = [c for c in col if c!='']
     return ' '.join(col[2:4])
 
 df = pd.read_html('https://www.numberfire.com/nba/daily-fantasy/daily-basketball-projections')[3]
 df.columns = [c[1] for c in df.columns]
-df.Player = df.Player.apply(dc.name_clean)
 df.Player = df.Player.apply(name_extract)
 df.Player = df.Player.apply(dc.name_clean)
 
@@ -297,14 +299,13 @@ dm.write_to_db(df, 'Player_Stats', 'FantasyData', if_exist='append')
 
 class NBAStats:
     
-    def __init__(self, game_date):
+    def __init__(self):
         
         import nba_api.stats.endpoints as ep
 
-        self.game_date = self.get_datetime(game_date)
         self.nba_teams = self.get_nba_teams()
         self.ep = ep
-        self.games = self.game_finder()
+        self.all_games = self.game_finder()
 
     @staticmethod
     def get_datetime(game_date):
@@ -323,10 +324,13 @@ class NBAStats:
     def game_finder(self):
         gamefinder = self.ep.leaguegamefinder.LeagueGameFinder()
         games = gamefinder.get_data_frames()[0]
-
         games.GAME_DATE = pd.to_datetime(games.GAME_DATE).apply(lambda x: x.date())
-        games = games[(games.GAME_DATE == self.game_date) & (games.TEAM_ABBREVIATION.isin(self.nba_teams))].reset_index(drop=True)
         return games
+    
+    def filter_games(self):
+        return self.all_games[(self.all_games.GAME_DATE == self.game_date) &\
+                              (self.all_games.TEAM_ABBREVIATION.isin(self.nba_teams))].reset_index(drop=True)
+
 
     def player_team_df(self, ep_data):
         player_data = ep_data.get_data_frames()[0]
@@ -352,7 +356,10 @@ class NBAStats:
         adv_box_score_player, adv_box_score_team = self.player_team_df(adv_box_score)
         return adv_box_score_player, adv_box_score_team
 
-    def pull_all_stats(self, stat_cat):
+    def pull_all_stats(self, stat_cat, game_date):
+
+        self.game_date = game_date#self.get_datetime(game_date)
+        games = self.filter_games()
 
         stat_cats = {
             'box_score': 'self.get_box_score(game_id)',
@@ -362,7 +369,7 @@ class NBAStats:
 
         print(f'Pulling {stat_cat}')
         players, teams = pd.DataFrame(), pd.DataFrame()
-        for game_id in self.games.GAME_ID.unique():
+        for game_id in games.GAME_ID.unique():
             print(game_id)
             try: 
                 player, team = eval(stat_cats[stat_cat])
@@ -375,15 +382,17 @@ class NBAStats:
 
         return players.reset_index(drop=True), teams.reset_index(drop=True)
 
+nba_stats = NBAStats()
 
+#%%
+import time
+yesterday_date = dt.datetime(2023, 2, 15).date()
 
-yesterday_date = dt.datetime.now().date()-dt.timedelta(1)
-
-nba_stats = NBAStats(yesterday_date.strftime('%Y-%m-%d'))
-
-box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score')
-tracking_players, tracking_teams = nba_stats.pull_all_stats('tracking_data')
-adv_players, adv_teams = nba_stats.pull_all_stats('advanced_stats')
+box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score', yesterday_date)
+time.time.sleep(10)
+tracking_players, tracking_teams = nba_stats.pull_all_stats('tracking_data', yesterday_date)
+time.time.sleep(10)
+adv_players, adv_teams = nba_stats.pull_all_stats('advanced_stats', yesterday_date)
 
 dfs = [box_score_players, tracking_players, adv_players]
 tnames = ['Box_Score', 'Tracking_Data', 'Advanced_Stats']

@@ -22,7 +22,7 @@ root_path = ffgeneral.get_main_path('NBA_SGP')
 db_path = f'{root_path}/Data/'
 dm = DataManage(db_path)
 
-pd.set_option('display.max_rows', 100)
+pd.set_option('display.max_rows', 200)
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', 1000)
 pd.set_option('display.colheader_justify', 'center')
@@ -659,7 +659,7 @@ run_params = {
     # set year and week to analyze
     'cv_time_input_orig': '2023-02-03',
     'train_date_orig': '2023-02-16',
-    'test_time_split_orig': '2023-02-24',
+    'test_time_split_orig': '2023-02-25',
     'metrics': ['points', 'rebounds', 'assists', 'three_pointers'],
 
     'n_iters': 25,

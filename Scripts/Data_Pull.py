@@ -333,6 +333,19 @@ class NBAStats:
         return self.all_games[(self.all_games.GAME_DATE == self.game_date) &\
                               (self.all_games.TEAM_ABBREVIATION.isin(self.nba_teams))].reset_index(drop=True)
 
+    @staticmethod
+    def update_team_names(df):
+        team_update = {
+               'GSW': 'GS',
+               'PHX': 'PHO',
+               'NOP': 'NO',
+               'NYK': 'NY',
+               'SAS': 'SA'
+               }
+        for ot, nt in team_update.items(): 
+            df.loc[df.TEAM_ABBREVIATION==ot, 'TEAM_ABBREVIATION'] = nt
+
+        return df
 
     def player_team_df(self, ep_data):
         player_data = ep_data.get_data_frames()[0]
@@ -340,6 +353,9 @@ class NBAStats:
 
         player_data['game_date'] = self.game_date
         team_data['game_date'] = self.game_date
+
+        player_data = self.update_team_names(player_data)
+        team_data = self.update_team_names(team_data)
 
         return player_data, team_data
 
@@ -388,7 +404,7 @@ nba_stats = NBAStats()
 
 #%%
 import time
-yesterday_date = dt.datetime(2023, 2, 23).date()
+yesterday_date = dt.datetime(2023, 2, 24).date()
 
 box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score', yesterday_date)
 time.sleep(5)

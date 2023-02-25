@@ -159,280 +159,165 @@ def rolling_proj_stats(df):
 
 
 
-def calc_market_share(df):
+# def calc_market_share(df):
     
-    player_cols = ['rush_rush_attempt_sum', 'rec_xyac_mean_yardage_sum', 'rush_yards_gained_sum',
-                   'rush_ep_sum', 'rush_ydstogo_sum', 'rush_touchdown_sum',
-                   'rush_yardline_100_sum', 'rush_first_down_sum', 'rec_yards_gained_sum', 
-                   'rec_first_down_sum', 'rec_epa_sum', 'rec_qb_epa_sum', 'rec_cp_sum','rec_xyac_epa_sum', 
-                   'rec_pass_attempt_sum', 'rec_xyac_success_sum', 'rec_comp_air_epa_sum',
-                   'rec_air_yards_sum', 'rec_touchdown_sum', 'rec_xyac_median_yardage_sum',
-                   'rec_complete_pass_sum', 'rec_qb_dropback_sum']
+#     player_cols = ['rush_rush_attempt_sum', 'rec_xyac_mean_yardage_sum', 'rush_yards_gained_sum',
+#                    'rush_ep_sum', 'rush_ydstogo_sum', 'rush_touchdown_sum',
+#                    'rush_yardline_100_sum', 'rush_first_down_sum', 'rec_yards_gained_sum', 
+#                    'rec_first_down_sum', 'rec_epa_sum', 'rec_qb_epa_sum', 'rec_cp_sum','rec_xyac_epa_sum', 
+#                    'rec_pass_attempt_sum', 'rec_xyac_success_sum', 'rec_comp_air_epa_sum',
+#                    'rec_air_yards_sum', 'rec_touchdown_sum', 'rec_xyac_median_yardage_sum',
+#                    'rec_complete_pass_sum', 'rec_qb_dropback_sum']
 
-    team_cols = ['team_' + c for c in player_cols]
+#     team_cols = ['team_' + c for c in player_cols]
 
-    for p, t in zip(player_cols, team_cols):
-        df[p+'_share'] = df[p] / (df[t]+0.5)
+#     for p, t in zip(player_cols, team_cols):
+#         df[p+'_share'] = df[p] / (df[t]+0.5)
 
-    share_cols = [c+'_share' for c in player_cols]
-    df[share_cols] = df[share_cols].fillna(0)
-    df = add_rolling_stats(df, gcols=['player'], rcols=share_cols)
+#     share_cols = [c+'_share' for c in player_cols]
+#     df[share_cols] = df[share_cols].fillna(0)
+#     df = add_rolling_stats(df, gcols=['player'], rcols=share_cols)
 
-    df = forward_fill(df)
-    share_cols = [c for c in df.columns if 'share' in c]
-    df[share_cols] = df[share_cols].fillna(0)
+#     df = forward_fill(df)
+#     share_cols = [c for c in df.columns if 'share' in c]
+#     df[share_cols] = df[share_cols].fillna(0)
 
-    return df
+#     return df
 
 
-def add_player_comparison(df, cols):
+# def add_player_comparison(df, cols):
     
-    to_agg = {c: [np.mean, np.max, np.min] for c in cols}
-    team_stats = df.groupby(['team', 'week', 'year']).agg(to_agg)
+#     to_agg = {c: [np.mean, np.max, np.min] for c in cols}
+#     team_stats = df.groupby(['team', 'week', 'year']).agg(to_agg)
 
-    diff_df = df[['player', 'team', 'week', 'year']].drop_duplicates()
-    for c in cols:
-        tmp_df = team_stats[c].reset_index()
-        tmp_df = pd.merge(tmp_df, df[['player', 'team', 'week', 'year', c]], on=['team', 'week', 'year'])
+#     diff_df = df[['player', 'team', 'week', 'year']].drop_duplicates()
+#     for c in cols:
+#         tmp_df = team_stats[c].reset_index()
+#         tmp_df = pd.merge(tmp_df, df[['player', 'team', 'week', 'year', c]], on=['team', 'week', 'year'])
 
-        for a in ['mean', 'amin', 'amax']:
-            tmp_df[f'{c}_{a}_diff'] = tmp_df[c] - tmp_df[a]
+#         for a in ['mean', 'amin', 'amax']:
+#             tmp_df[f'{c}_{a}_diff'] = tmp_df[c] - tmp_df[a]
     
-        tmp_df = tmp_df[['player', 'team', 'week', 'year', f'{c}_mean_diff', f'{c}_amax_diff', f'{c}_amin_diff']]
-        diff_df = pd.merge(diff_df, tmp_df, on=['player', 'team', 'week', 'year'])
+#         tmp_df = tmp_df[['player', 'team', 'week', 'year', f'{c}_mean_diff', f'{c}_amax_diff', f'{c}_amin_diff']]
+#         diff_df = pd.merge(diff_df, tmp_df, on=['player', 'team', 'week', 'year'])
         
-    diff_df = diff_df.drop_duplicates()
-    team_stats.columns = [f'{c[0]}_{c[1]}' for c in team_stats.columns]
-    team_stats = team_stats.reset_index().drop_duplicates()
+#     diff_df = diff_df.drop_duplicates()
+#     team_stats.columns = [f'{c[0]}_{c[1]}' for c in team_stats.columns]
+#     team_stats = team_stats.reset_index().drop_duplicates()
 
-    df = pd.merge(df, team_stats, on=['team', 'week', 'year'])
-    df = pd.merge(df, diff_df, on=['player', 'team', 'week', 'year'])
+#     df = pd.merge(df, team_stats, on=['team', 'week', 'year'])
+#     df = pd.merge(df, diff_df, on=['player', 'team', 'week', 'year'])
 
-    return df
+#     return df
 
 
-def pos_rank_stats(df, team_pos_rank, pos):
+# def pos_rank_stats(df, team_pos_rank, pos):
     
-    pos_stats = dm.read(f'''SELECT * 
-                            FROM {pos}_Stats 
-                            WHERE (season = 2020 AND week != 17)
-                                    OR (season >=2021 AND week != 18)
-                            ''', 'FastR')
-    pos_stats = pos_stats.rename(columns={'season': 'year'})
+#     pos_stats = dm.read(f'''SELECT * 
+#                             FROM {pos}_Stats 
+#                             WHERE (season = 2020 AND week != 17)
+#                                     OR (season >=2021 AND week != 18)
+#                             ''', 'FastR')
+#     pos_stats = pos_stats.rename(columns={'season': 'year'})
 
-    pos_rank_cols = ['rush_rush_attempt_sum', 'rec_xyac_mean_yardage_sum', 'rush_yards_gained_sum',
-                    'rush_ep_sum', 'rush_ydstogo_sum', 'rush_touchdown_sum',
-                    'rush_yardline_100_sum', 'rush_first_down_sum', 'rec_yards_gained_sum', 
-                    'rec_first_down_sum', 'rec_epa_sum', 'rec_qb_epa_sum', 'rec_cp_sum','rec_xyac_epa_sum', 
-                    'rec_pass_attempt_sum', 'rec_xyac_success_sum', 'rec_comp_air_epa_sum',
-                    'rec_air_yards_sum', 'rec_touchdown_sum', 'rec_xyac_median_yardage_sum',
-                    'rec_complete_pass_sum', 'rec_qb_dropback_sum'
-    ]
-    agg_cols = {c: 'sum' for c in pos_rank_cols}
+#     pos_rank_cols = ['rush_rush_attempt_sum', 'rec_xyac_mean_yardage_sum', 'rush_yards_gained_sum',
+#                     'rush_ep_sum', 'rush_ydstogo_sum', 'rush_touchdown_sum',
+#                     'rush_yardline_100_sum', 'rush_first_down_sum', 'rec_yards_gained_sum', 
+#                     'rec_first_down_sum', 'rec_epa_sum', 'rec_qb_epa_sum', 'rec_cp_sum','rec_xyac_epa_sum', 
+#                     'rec_pass_attempt_sum', 'rec_xyac_success_sum', 'rec_comp_air_epa_sum',
+#                     'rec_air_yards_sum', 'rec_touchdown_sum', 'rec_xyac_median_yardage_sum',
+#                     'rec_complete_pass_sum', 'rec_qb_dropback_sum'
+#     ]
+#     agg_cols = {c: 'sum' for c in pos_rank_cols}
 
-    pos_stats = pd.merge(team_pos_rank, pos_stats, on=['player', 'team', 'week', 'year'], how='left')
+#     pos_stats = pd.merge(team_pos_rank, pos_stats, on=['player', 'team', 'week', 'year'], how='left')
 
-    pos_stats = pos_stats.groupby(['pos_rank', 'team', 'week','year']).agg(agg_cols)
-    pos_stats.columns = ['pos_rank_' + c for c in pos_stats.columns]
-    pos_stats = pos_stats.reset_index()
+#     pos_stats = pos_stats.groupby(['pos_rank', 'team', 'week','year']).agg(agg_cols)
+#     pos_stats.columns = ['pos_rank_' + c for c in pos_stats.columns]
+#     pos_stats = pos_stats.reset_index()
 
-    gcols = ['team', 'pos_rank']
-    rcols=['pos_rank_' + c for c in pos_rank_cols]
-    pos_stats = pos_stats.sort_values(by=['team', 'pos_rank', 'year', 'week']).reset_index(drop=True)
+#     gcols = ['team', 'pos_rank']
+#     rcols=['pos_rank_' + c for c in pos_rank_cols]
+#     pos_stats = pos_stats.sort_values(by=['team', 'pos_rank', 'year', 'week']).reset_index(drop=True)
 
-    rolls3_mean = rolling_stats(pos_stats, gcols, rcols, 3, agg_type='mean')
-    rolls3_max = rolling_stats(pos_stats, gcols, rcols, 3, agg_type='max')
+#     rolls3_mean = rolling_stats(pos_stats, gcols, rcols, 3, agg_type='mean')
+#     rolls3_max = rolling_stats(pos_stats, gcols, rcols, 3, agg_type='max')
 
-    rolls8_mean = rolling_stats(pos_stats, gcols, rcols, 8, agg_type='mean')
-    rolls8_max = rolling_stats(pos_stats, gcols, rcols, 8, agg_type='max')
+#     rolls8_mean = rolling_stats(pos_stats, gcols, rcols, 8, agg_type='mean')
+#     rolls8_max = rolling_stats(pos_stats, gcols, rcols, 8, agg_type='max')
 
-    pos_stats = pd.concat([pos_stats, rolls8_mean, rolls8_max, rolls3_mean, rolls3_max], axis=1)
+#     pos_stats = pd.concat([pos_stats, rolls8_mean, rolls8_max, rolls3_mean, rolls3_max], axis=1)
 
-    pos_stats = pd.merge(team_pos_rank, pos_stats, on=['pos_rank', 'team', 'week', 'year'])
-    pos_stats = pos_stats.drop(['pos_rank_' + c for c in pos_rank_cols], axis=1)
+#     pos_stats = pd.merge(team_pos_rank, pos_stats, on=['pos_rank', 'team', 'week', 'year'])
+#     pos_stats = pos_stats.drop(['pos_rank_' + c for c in pos_rank_cols], axis=1)
 
-    pos_stats['week'] = pos_stats['week'] + 1
-    pos_stats = switch_seasons(pos_stats)
-    pos_stats = fix_bye_week(pos_stats)
+#     pos_stats['week'] = pos_stats['week'] + 1
+#     pos_stats = switch_seasons(pos_stats)
+#     pos_stats = fix_bye_week(pos_stats)
 
-    df = pd.merge(df, pos_stats, on=['player', 'team', 'pos', 'week', 'year'], how='left')
+#     df = pd.merge(df, pos_stats, on=['player', 'team', 'pos', 'week', 'year'], how='left')
 
-    return df
-    
+#     return df
 
+# def create_pos_rank(df, extra_pos=False):
+#     df = df.sort_values(by=['team', 'pos', 'year', 'week', 'avg_proj_points'],
+#                         ascending=[True, True, True, True, False]).reset_index(drop=True)
 
-
-def get_team_stats():
-    
-    team_stats = dm.read(f'''SELECT * 
-                             FROM Team_Stats 
-                             WHERE (season = 2020 AND week != 17)
-                                    OR (season >=2021 AND week != 18)''', 'FastR')
-
-    rcols_team = [c for c in team_stats.columns if 'rush_' in c or 'rec_' in c]
-
-    team_stats = team_stats.rename(columns={'season': 'year'})
-    team_stats = add_rolling_stats(team_stats, ['team'], rcols_team)
-
-    team_stats = team_stats[team_stats.year >= 2020].reset_index(drop=True)
-    team_stats['week'] = team_stats.week + 1
-    team_stats = switch_seasons(team_stats)
-    team_stats = fix_bye_week(team_stats)
-
-    return team_stats
+#     df['pos_rank'] = df.pos + df.groupby(['team', 'pos', 'year', 'week']).cumcount().apply(lambda x: str(x))
+#     if extra_pos:
+#         df = df[df['pos_rank'].isin(['RB0', 'RB1', 'RB2', 'WR0', 'WR1', 'WR2', 'WR3', 'WR4', 'TE0', 'TE1'])].reset_index(drop=True)
+#     else:
+#         df = df[df['pos_rank'].isin(['QB0', 'RB0', 'RB1', 'WR0', 'WR1', 'WR2', 'TE0'])].reset_index(drop=True)
+#     return df
 
 
-def format_lines(lines, is_home):
-    if is_home==1: label = 'home'
-    else: label = 'away'
+# def proj_market_share(df, proj_col_name):
 
-    lines = lines[[f'{label}_team', f'{label}_line', 'over_under', 'week', 'year']]
-    lines = lines.assign(is_home=is_home)
-    lines.columns = ['team', 'line', 'over_under', 'week', 'year', 'is_home']
-    
-    lines = dc.convert_to_float(lines)
-    lines['implied_points_for'] = (lines.over_under / 2) - (lines.line / 2) 
-    lines['implied_points_against'] = (lines.over_under / 2) + (lines.line / 2) 
-    
-    return lines
+#     proj_cols = [c for c in df.columns if proj_col_name in c]
 
-def format_scores(scores, is_home):
-    if is_home==1: label = 'home'
-    else: label = 'away'
-
-    scores = scores[[f'{label}_team', f'{label}_score', 'week', 'year']]
-    scores = scores.assign(is_home=is_home)
-    scores.columns = ['team', 'final_score', 'week', 'year', 'is_home']
-    
-    return scores
-
-def join_lines_scores(lines, final_scores):
-
-    home_lines = format_lines(lines, is_home=1)
-    away_lines = format_lines(lines, is_home=0)
-    all_lines = pd.concat([home_lines, away_lines], axis=0)
-
-    home_scores = format_scores(final_scores, is_home=1)
-    away_scores = format_scores(final_scores, is_home=0)
-    scores = pd.concat([home_scores, away_scores], axis=0)
-    
-    scores = pd.merge(all_lines, scores, on=['team', 'week', 'year', 'is_home'])
-
-    return scores
-
-def create_scores_lines_table(WEEK, YEAR):
-
-    lines = dm.read("SELECT * FROM Gambling_Lines WHERE year>=2020", 'Pre_TeamData')
-    final_scores = dm.read("SELECT * FROM Final_Scores WHERE year>=2020", 'FastR')
-    scores_lines = join_lines_scores(lines, final_scores)
-    try:
-        cur_lines = dm.read(f"SELECT * FROM Gambling_Lines WHERE year={YEAR} AND week={WEEK}", 'Pre_TeamData')
-        cur_home = format_lines(cur_lines, is_home=1)
-        cur_away = format_lines(cur_lines, is_home=0)
-        cur_lines = pd.concat([cur_home, cur_away], axis=0)
-        scores_lines = pd.concat([scores_lines, cur_lines], axis=0)
-    except:
-        print('Current week not available')
-
-    dm.write_to_db(scores_lines, 'Model_Features', 'Scores_Lines', 'replace')
+#     for proj_col in proj_cols:
+#         orig_col = proj_col.replace(proj_col_name, '')
+#         if orig_col in df.columns:
+#             df[f'{proj_col_name}share_{orig_col}'] = df[orig_col] / (df[proj_col]+3)
+#             df[f'{proj_col_name}share_diff_{orig_col}'] = df[orig_col] - df[proj_col]
+#             df[[f'{proj_col_name}share_{orig_col}', f'{proj_col_name}share_diff_{orig_col}']] = \
+#                 df[[f'{proj_col_name}share_{orig_col}', f'{proj_col_name}share_diff_{orig_col}']].fillna(0)
+#     return df
 
 
-def add_gambling_lines(df):
+# def results_vs_predicted(df, col):
 
-    lines = dm.read("SELECT * FROM Gambling_Lines", 'Pre_TeamData')
-    home_lines = format_lines(lines, is_home=1)
-    away_lines = format_lines(lines, is_home=0)
-    lines = pd.concat([home_lines, away_lines], axis=0)
+#     df = df.sort_values(by=['player','year', 'week']).reset_index(drop=True)
+#     df[f'{col}_miss'] = df.y_act - df[col]
+#     df[f'{col}_miss'] = (df.groupby('player')[f'{col}_miss'].shift(1)).fillna(0)
+#     df = add_rolling_stats(df, ['player'], [f'{col}_miss'], perform_check=False)
+#     df[f'{col}_miss_recent_vs8'] = df[f'rmean3_{col}_miss'] - df[f'rmean8_{col}_miss']
 
-    df = pd.merge(df, lines, on=['team', 'week', 'year'], how='left')
+#     good_cols = [c for c in df.columns if 'miss' in c or c in ('player', 'team', 'week', 'year')]
+#     df = df[good_cols]
 
-    return df
+#     return df
 
-#-----------------------
-# Attach Points
-#-----------------------
+# def projected_pts_vs_predicted(df):
 
-def results_vs_predicted(df, col):
+#     proj_pts_miss = df[['player', 'team', 'week', 'year']].copy()
+#     for c in ['ffa_points', 'projected_points', 'fantasyPoints', 'ProjPts', 
+#               'fc_proj_fantasy_pts_fc', 'fft_proj_pts', 'avg_proj_points']:
+#         if c in df.columns:
+#             cur_miss = results_vs_predicted(df[['player', 'team', 'week', 'year', 'y_act', c]].copy(), c)
+#             proj_pts_miss = pd.merge(proj_pts_miss, cur_miss, on=['player', 'team', 'week', 'year']) 
 
-    df = df.sort_values(by=['player','year', 'week']).reset_index(drop=True)
-    df[f'{col}_miss'] = df.y_act - df[col]
-    df[f'{col}_miss'] = (df.groupby('player')[f'{col}_miss'].shift(1)).fillna(0)
-    df = add_rolling_stats(df, ['player'], [f'{col}_miss'], perform_check=False)
-    df[f'{col}_miss_recent_vs8'] = df[f'rmean3_{col}_miss'] - df[f'rmean8_{col}_miss']
+#     df = pd.merge(df, proj_pts_miss, on=['player', 'team', 'week', 'year'], how='left')
+#     df = forward_fill(df)
 
-    good_cols = [c for c in df.columns if 'miss' in c or c in ('player', 'team', 'week', 'year')]
-    df = df[good_cols]
+#     miss_cols = [c for c in df.columns if 'miss' in c]
+#     df[miss_cols] = df[miss_cols].fillna(0)
 
-    return df
-
-def projected_pts_vs_predicted(df):
-
-    proj_pts_miss = df[['player', 'team', 'week', 'year']].copy()
-    for c in ['ffa_points', 'projected_points', 'fantasyPoints', 'ProjPts', 
-              'fc_proj_fantasy_pts_fc', 'fft_proj_pts', 'avg_proj_points']:
-        if c in df.columns:
-            cur_miss = results_vs_predicted(df[['player', 'team', 'week', 'year', 'y_act', c]].copy(), c)
-            proj_pts_miss = pd.merge(proj_pts_miss, cur_miss, on=['player', 'team', 'week', 'year']) 
-
-    df = pd.merge(df, proj_pts_miss, on=['player', 'team', 'week', 'year'], how='left')
-    df = forward_fill(df)
-
-    miss_cols = [c for c in df.columns if 'miss' in c]
-    df[miss_cols] = df[miss_cols].fillna(0)
-
-    return df
-
-
-def attach_y_act(df, pos, defense=False, rush_or_pass=''):
-
-    if defense:
-        y_act = dm.read(f'''SELECT defTeam player, week, season year, fantasy_pts y_act
-                            FROM {pos}_Stats
-                            WHERE season >= 2020''', 'FastR')
-    
-        df = pd.merge(df, y_act, on=['player',  'week', 'year'], how='left')
-    
-    elif pos=='QB':
-        y_act = dm.read(f'''SELECT player, team, week, season year,
-                                   fantasy_pts{rush_or_pass} y_act
-                            FROM {pos}_Stats
-                            WHERE season >= 2020
-                                  AND pass_pass_attempt_sum > 15''', 'FastR')
-    
-        df = pd.merge(df, y_act, on=['player', 'team', 'week', 'year'], how='left')
-    
-    else:
-        y_act = dm.read(f'''SELECT player, team, week, season year, fantasy_pts y_act
-                            FROM {pos}_Stats
-                            WHERE season >= 2020''', 'FastR')
-                            
-        snaps = get_snap_data()
-        proj = dm.read('''SELECT player, week, year, fantasyPoints
-                          FROM PFF_Proj_Ranks''', 'Pre_PlayerData')
-
-        y_act = pd.merge(y_act, snaps, on=['player', 'week', 'year'], how='left')
-        y_act = pd.merge(y_act, proj, on=['player', 'week', 'year'], how='left')
-
-        y_act = y_act[~((y_act.fantasyPoints > 12) & \
-                        (y_act.snap_pct < y_act.avg_snap_pct*0.5) & \
-                        (y_act.snap_pct <= 0.4) & \
-                        (y_act.snap_pct > 0))].drop(['snap_pct', 'avg_snap_pct', 'fantasyPoints'], axis=1)
-        
-        df = pd.merge(df, y_act, on=['player', 'team', 'week', 'year'], how='left')
-
-    return df
+#     return df
 
 #-------------------
 # Final Cleanup
 #-------------------
-
-def drop_y_act_except_current(df, week, year):
-    
-    
-    df = df[~(df.y_act.isnull()) | ((df.week==week) & (df.year==year))].reset_index(drop=True)
-    df.loc[((df.week==week) & (df.year==year)), 'y_act'] = 0
-
-    return df
 
 def remove_non_uniques(df):
     cols = df.nunique()[df.nunique()==1].index
@@ -441,124 +326,11 @@ def remove_non_uniques(df):
     return df
 
 def drop_duplicate_players(df):
-    df = df.sort_values(by=['player', 'year', 'week', 'projected_points', 'ffa_points'],
-                    ascending=[True, True, True, False, False])
-    df = df.drop_duplicates(subset=['player', 'year', 'week'], keep='first').reset_index(drop=True)
+    df = df.sort_values(by=['player', 'game_date', 'avg_proj_points'],
+                        ascending=[True, True, False])
+    df = df.drop_duplicates(subset=['player', 'game_date'], keep='first').reset_index(drop=True)
     return df
 
-
-def remove_low_corrs(df, corr_cut=0.015):
-    obj_cols = df.dtypes[df.dtypes=='object'].index
-    corrs = pd.DataFrame(np.corrcoef(df.drop(obj_cols, axis=1).values, rowvar=False), 
-                         columns=[c for c in df.columns if c not in obj_cols],
-                         index=[c for c in df.columns if c not in obj_cols])
-    corrs = corrs['y_act']
-    low_corrs = list(corrs[abs(corrs) < corr_cut].index)
-    low_corrs = [c for c in low_corrs if c not in ('week', 'year')]
-    df = df.drop(low_corrs, axis=1)
-    print(f'Removed {len(low_corrs)}/{df.shape[1]} columns')
-    
-    corrs = corrs.dropna().sort_values()
-    display(corrs.iloc[:20])
-    display(corrs.iloc[-20:])
-    display(corrs[~corrs.index.str.contains('ffa|proj|expert|rank|Proj|fc|salary|Points|Rank') | \
-                   corrs.index.str.contains('team') | \
-                   corrs.index.str.contains('qb')].iloc[:20])
-    display(corrs[~corrs.index.str.contains('ffa|proj|expert|rank|Proj|fc|salary|Points|Rank') | \
-                   corrs.index.str.contains('team') | \
-                   corrs.index.str.contains('qb')].iloc[-20:])
-    return df
-
-
-#--------------------
-# Data to apply to all datasets
-#--------------------
-
-
-def create_pos_rank(df, extra_pos=False):
-    df = df.sort_values(by=['team', 'pos', 'year', 'week', 'avg_proj_points'],
-                        ascending=[True, True, True, True, False]).reset_index(drop=True)
-
-    df['pos_rank'] = df.pos + df.groupby(['team', 'pos', 'year', 'week']).cumcount().apply(lambda x: str(x))
-    if extra_pos:
-        df = df[df['pos_rank'].isin(['RB0', 'RB1', 'RB2', 'WR0', 'WR1', 'WR2', 'WR3', 'WR4', 'TE0', 'TE1'])].reset_index(drop=True)
-    else:
-        df = df[df['pos_rank'].isin(['QB0', 'RB0', 'RB1', 'WR0', 'WR1', 'WR2', 'TE0'])].reset_index(drop=True)
-    return df
-
-
-def get_team_projections():
-
-    team_proj = pd.DataFrame()
-    for pos in ['QB', 'RB', 'WR', 'TE']:
-
-        tp = fantasy_pros_new(pos)
-        tp = pff_experts_new(tp, pos)
-        tp = ffa_compile(tp, 'FFA_Projections', pos)
-        tp = ffa_compile(tp, 'FFA_RawStats', pos)
-        tp = fftoday_proj(tp, pos)
-        tp = fantasy_cruncher(tp, pos)
-        tp = get_salaries(tp, pos)
-
-        tp = consensus_fill(tp)
-        tp = fill_ratio_nulls(tp)
-        tp = log_rank_cols(tp)
-        team_proj = pd.concat([team_proj, tp], axis=0)
-
-    team_proj = create_pos_rank(team_proj)
-    team_proj = forward_fill(team_proj)
-    team_proj = team_proj.fillna(0)
-
-    cnts = team_proj.groupby(['team', 'week', 'year']).agg({'avg_proj_points': 'count'})
-    print('Team counts that do not equal 7:', cnts[cnts.avg_proj_points!=7])
-
-    cols = [
-            'projected_points', 'ProjPts', 'ffa_points', 'fc_proj_fantasy_pts_fc', 'avg_proj_points', 
-            'fantasyPoints', 'dk_salary', 'fd_salary',
-            'log_ffa_rank', 'log_avg_proj_rank', 'log_expertConsensus', 'log_rankadj_fp_rank', 'log_playeradj_fp_rank', 'log_fp_rank',
-            'rushAtt', 'rushYds', 'rushTd', 'recvTargets', 'recvReceptions', 'recvYds', 'recvTd',
-            'ffa_rush_yds', 'ffa_rush_tds','ffa_rec', 'ffa_rec_yds','ffa_rec_tds',
-            'fft_rush_att', 'fft_rush_yds', 'fft_rush_td', 'fft_rec', 'fft_rec_yds', 'fft_rec_td', 'fft_proj_pts',
-            'fc_proj_rushing_stats_att', 'fc_proj_rushing_stats_yrds', 'fc_proj_rushing_stats_tds',
-            'fc_proj_receiving_stats_tar', 'fc_proj_receiving_stats_rec',
-            'fc_proj_receiving_stats_yrds', 'fc_proj_receiving_stats_tds', 
-            'avg_proj_rush_att', 'avg_proj_rush_td', 'avg_proj_rec', 'avg_proj_rec_tgts','avg_proj_rec_yds','avg_proj_rec_td', 
-            ]
-
-    to_agg = {c: 'sum' for c in cols}
-
-    # get the projections broken out by RB and WR/TE
-    team_proj_pos = team_proj[team_proj.pos.isin(['RB', 'WR', 'TE'])].copy()
-    team_proj_pos.loc[team_proj_pos.pos=='TE', 'pos'] = 'WR'
-    team_proj_pos = team_proj_pos.groupby(['pos', 'team', 'week', 'year']).agg(to_agg)
-    team_proj_pos.columns = [f'pos_proj_{c}' for c in team_proj_pos.columns]
-    team_proj_pos = team_proj_pos.reset_index()
-    team_proj_pos_te = team_proj_pos[team_proj_pos.pos=='WR'].copy()
-    team_proj_pos_te['pos'] = 'TE'
-    team_proj_pos = pd.concat([team_proj_pos, team_proj_pos_te], axis=0).reset_index(drop=True)
-    
-    # get the projections broken out by team
-    team_proj = team_proj.groupby(['team', 'week', 'year']).agg(to_agg)
-    team_proj.columns = [f'team_proj_{c}' for c in team_proj.columns]
-    team_proj = team_proj.reset_index()
-
-    return team_proj, team_proj_pos
-
-def proj_market_share(df, proj_col_name):
-
-    proj_cols = [c for c in df.columns if proj_col_name in c]
-
-    for proj_col in proj_cols:
-        orig_col = proj_col.replace(proj_col_name, '')
-        if orig_col in df.columns:
-            df[f'{proj_col_name}share_{orig_col}'] = df[orig_col] / (df[proj_col]+3)
-            df[f'{proj_col_name}share_diff_{orig_col}'] = df[orig_col] - df[proj_col]
-            df[[f'{proj_col_name}share_{orig_col}', f'{proj_col_name}share_diff_{orig_col}']] = \
-                df[[f'{proj_col_name}share_{orig_col}', f'{proj_col_name}share_diff_{orig_col}']].fillna(0)
-    return df
-
-
-#%%
 
 def cleanup_minutes(df):
     df = df.dropna(subset=['MIN']).reset_index(drop=True)
@@ -626,6 +398,84 @@ def add_advanced_stats(df):
 
     return df
 
+
+def add_tracking_stats(df):
+    track = dm.read("SELECT * FROM Tracking_Data", 'Player_Stats')
+    track = track.rename(columns={'PLAYER_NAME': 'player'})
+
+    track = track.drop(['GAME_ID', 'TEAM_ABBREVIATION', 'MIN', 'TEAM_ID', 'TEAM_CITY', 
+                    'PLAYER_ID', 'START_POSITION', 'COMMENT'], axis=1)
+    track = track.sort_values(by=['player', 'game_date']).reset_index(drop=True)
+
+    r_cols = [c for c in track.columns if c not in ('player', 'game_date')]
+    track = add_rolling_stats(track, gcols=['player'], rcols=r_cols)
+
+    track = track.drop(['SPD', 'DIST', 'ORBC', 'DRBC', 'RBC', 'TCHS', 'SAST', 'FTAST',
+                        'PASS', 'AST', 'CFGM', 'CFGA', 'CFG_PCT', 'UFGM', 'UFGA', 'UFG_PCT',
+                        'FG_PCT', 'DFGM', 'DFGA', 'DFG_PCT'
+                  ], axis=1)
+    
+    track.game_date = track.groupby('player')['game_date'].shift(-1)
+    track = track.fillna({'game_date': max_date})
+    df = pd.merge(df, track, on=['player', 'game_date'], how='left')
+
+    return df
+
+
+def add_team_box_score(df, team_or_opp):
+    team_bs = dm.read("SELECT * FROM Box_Score", 'Team_Stats')
+    team_bs  = team_bs.rename(columns={'TEAM_ABBREVIATION': team_or_opp})
+
+    team_bs = team_bs.drop(['GAME_ID', 'MIN', 'TEAM_ID', 'TEAM_CITY', 'TEAM_NAME'], axis=1)
+    team_bs = team_bs.sort_values(by=[team_or_opp, 'game_date']).reset_index(drop=True)
+
+    r_cols = [c for c in team_bs.columns if c not in (team_or_opp, 'game_date')]
+    team_bs = add_rolling_stats(team_bs, gcols=[team_or_opp], rcols=r_cols)
+    team_bs = team_bs.drop(r_cols, axis=1)
+        
+    team_bs.game_date = team_bs.groupby(team_or_opp)['game_date'].shift(-1)
+    team_bs = team_bs.fillna({'game_date': max_date})
+    team_bs.columns = [f'{team_or_opp}_{c}' if c not in (team_or_opp, 'game_date') else c for c in team_bs.columns]
+    df = pd.merge(df, team_bs, on=[team_or_opp, 'game_date'], how='left')
+
+    return df
+
+def add_team_advanced_stats(df, team_or_opp):
+    team_adv = dm.read("SELECT * FROM Advanced_Stats", 'Team_Stats')
+    team_adv  = team_adv.rename(columns={'TEAM_ABBREVIATION': team_or_opp})
+
+    team_adv = team_adv.drop(['GAME_ID', 'MIN', 'TEAM_ID', 'TEAM_CITY', 'TEAM_NAME'], axis=1)
+    team_adv = team_adv.sort_values(by=[team_or_opp, 'game_date']).reset_index(drop=True)
+
+    r_cols = [c for c in team_adv.columns if c not in (team_or_opp, 'game_date')]
+    team_adv = add_rolling_stats(team_adv, gcols=[team_or_opp], rcols=r_cols)
+    team_adv = team_adv.drop(r_cols, axis=1)
+        
+    team_adv.game_date = team_adv.groupby(team_or_opp)['game_date'].shift(-1)
+    team_adv = team_adv.fillna({'game_date': max_date})
+    team_adv.columns = [f'{team_or_opp}_{c}' if c not in (team_or_opp, 'game_date') else c for c in team_adv.columns]
+    df = pd.merge(df, team_adv, on=[team_or_opp, 'game_date'], how='left')
+
+    return df
+
+def add_team_tracking(df, team_or_opp):
+    team_tr = dm.read("SELECT * FROM Tracking_Data", 'Team_Stats')
+    team_tr  = team_tr.rename(columns={'TEAM_ABBREVIATION': team_or_opp})
+
+    team_tr = team_tr.drop(['GAME_ID', 'MIN', 'TEAM_ID', 'TEAM_CITY', 'TEAM_NAME'], axis=1)
+    team_tr = team_tr.sort_values(by=[team_or_opp, 'game_date']).reset_index(drop=True)
+
+    r_cols = [c for c in team_tr.columns if c not in (team_or_opp, 'game_date')]
+    team_tr = add_rolling_stats(team_tr, gcols=[team_or_opp], rcols=r_cols)
+    team_tr = team_tr.drop(r_cols, axis=1)
+        
+    team_tr.game_date = team_tr.groupby(team_or_opp)['game_date'].shift(-1)
+    team_tr = team_tr.fillna({'game_date': max_date})
+    team_tr.columns = [f'{team_or_opp}_{c}' if c not in (team_or_opp, 'game_date') else c for c in team_tr.columns]
+    df = pd.merge(df, team_tr, on=[team_or_opp, 'game_date'], how='left')
+
+    return df
+
 #%%
 
 max_date = dm.read("SELECT max(game_date) FROM FantasyData", 'Player_Stats').values[0][0]
@@ -648,8 +498,20 @@ df = df[(df.game_date==max_date) | ~(df.MIN.isnull())]
 box_score_roll = box_score_rolling(box_score)
 df = pd.merge(df, box_score_roll, on=['player', 'game_date'])
 
+# add the rolling advanced stats and tracking stats
 df = add_advanced_stats(df)
+df = add_tracking_stats(df)
+
+# add team stats
+df = add_team_box_score(df, 'team')
+df = add_team_box_score(df, 'opponent')
+df = add_team_advanced_stats(df, 'team')
+df = add_team_advanced_stats(df, 'opponent')
+df = add_team_tracking(df, 'team')
+df = add_team_tracking(df, 'opponent')
+
 df = forward_fill(df)
+
 df = add_y_act(df, box_score)
 df = df.dropna(axis=0, subset=[c for c in df.columns if 'y_act' not in c]).reset_index(drop=True)
 
@@ -660,5 +522,8 @@ if df.shape[1] > 2000:
     dm.write_to_db(df.iloc[:,2000:], 'Model_Features', 'Model_Data2', if_exist='replace')
 
 # %%
-
-# %%
+# for t in ['Box_Score', 'Advanced_Stats', 'Tracking_Data']:
+#     df = dm.read(f"SELECT * FROM {t}", 'Player_Stats')
+#     df.loc[df.TEAM_ABBREVIATION=='NYK', 'TEAM_ABBREVIATION'] = 'NY'
+#     df.loc[df.TEAM_ABBREVIATION=='SAS', 'TEAM_ABBREVIATION'] = 'SA'
+#     dm.write_to_db(df, 'Player_Stats', t, 'replace', True)

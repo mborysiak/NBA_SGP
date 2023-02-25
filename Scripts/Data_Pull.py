@@ -189,6 +189,8 @@ props = nba_scrape.nba_props_dk()
 props_df = nba_scrape.dict_to_df(props)
 props_df['game_date'] = dt.datetime.now().date()
 props_df.player = props_df.player.apply(dc.name_clean)
+props_df.loc[props_df.stat_type=='Threes', 'stat_type'] = 'three_pointers'
+
 props_df.head(10)
 
 # %%
@@ -386,12 +388,12 @@ nba_stats = NBAStats()
 
 #%%
 import time
-yesterday_date = dt.datetime(2023, 2, 15).date()
+yesterday_date = dt.datetime(2023, 2, 23).date()
 
 box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score', yesterday_date)
-time.time.sleep(10)
+time.sleep(5)
 tracking_players, tracking_teams = nba_stats.pull_all_stats('tracking_data', yesterday_date)
-time.time.sleep(10)
+time.sleep(5)
 adv_players, adv_teams = nba_stats.pull_all_stats('advanced_stats', yesterday_date)
 
 dfs = [box_score_players, tracking_players, adv_players]

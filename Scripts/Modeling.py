@@ -40,7 +40,7 @@ run_params = {
     
     # set year and week to analyze
     'cv_time_input': '2023-02-03',
-    'train_time_split': '2023-02-13',
+    'train_time_split': '2023-02-16',
     'metrics': ['points', 'rebounds', 'assists', 'three_pointers'],
 
     'n_iters': 25,
@@ -106,6 +106,15 @@ def train_predict_split(df, run_params):
 
     return df_train, df_predict, output_start, min_samples
 
+def create_value_columns(df, metric):
+
+    for c in df.columns:
+        if metric in c:
+            df[c + '_vs_value'] = df[c] - df.value
+            df[c + '_over_value'] = df[c] / df.value
+
+    return df
+
 def pull_odds(metric):
 
     odds = dm.read(f'''SELECT player, stat_type, game_date year, value, over_under
@@ -124,6 +133,8 @@ def get_over_under_class(df, metric):
     odds = pull_odds(metric)
     df = pd.merge(df, odds, on=['player', 'year'])
     df['y_act'] = np.where(df.y_act > df.value, 1, 0)
+    df = create_value_columns(df, metric)
+
     return df
 
 #----------------
@@ -307,7 +318,7 @@ for metric in run_params['metrics']:
     # Run Models
     #=========
 
-    # run all other models
+    # run all models
     model_list = [ 'bridge', 'huber', 'lgbm', 'ridge', 'svr', 'lasso', 'enet', 'xgb', 'knn', 'gbm', 'gbmh', 'rf']
     for i, m in enumerate(model_list):
         out_reg, _, _ = get_model_output(m, df_train, 'reg', out_reg, run_params, i, min_samples)

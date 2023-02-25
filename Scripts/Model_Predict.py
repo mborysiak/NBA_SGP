@@ -513,6 +513,86 @@ def show_calibration_curve(y_true, y_pred, n_bins=10, strategy='quantile'):
     plt.show()
 
 #-----------------------
+# Over Under Classification
+#-----------------------
+
+
+    def pull_odds(metric):
+
+        odds = dm.read(f'''SELECT player, stat_type, game_date year, value, over_under
+                        FROM Draftkings_Odds 
+                        ''', 'Player_Stats')
+        odds.stat_type = odds.stat_type.apply(lambda x: x.lower())
+        odds.year = odds.year.apply(lambda x: int(x.replace('-', '')))
+
+        odds = odds[odds.stat_type==metric].reset_index(drop=True)
+        odds = odds.loc[odds.over_under=='over', ['player', 'year', 'value']]
+
+        return odds
+
+
+    def get_over_under_class(df, metric, run_params):
+        
+        odds = pull_odds(metric)
+        df = pd.merge(df, odds, on=['player', 'year'])
+        df['y_act'] = np.where(df.y_act > df.value, 1, 0)
+        df = create_value_columns(df, metric)
+
+        df_train, df_predict, output_start, min_samples = train_predict_split(df, run_params)
+        
+        return df_train, df_predict, output_start, min_samples
+
+
+    def X_y_stack_class(df, metric, run_params):
+
+        df_train_class, df_predict_class, _, _ = get_over_under_class(df, metric, run_params)
+
+        # load the regregression predictions
+        _, _, models_class, _, full_hold_class = load_all_pickles(model_output_path, 'class')
+        X_stack_class, y_stack_class, df_labels = X_y_stack('class', full_hold_class)
+        X_stack_class = pd.concat([df_labels[['player', 'week', 'year']], df_train_class.value, X_stack_class], axis=1)
+
+        _, X, y = get_skm(df_train_class, 'class', to_drop=run_params['drop_cols'])
+        X_predict_class = create_stack_predict(df_predict_class, models_class, X, y, proba=True)
+        X_predict_class = pd.concat([df_predict_class[['player', 'value']], X_predict_class], axis=1)
+        
+        return df_predict_class, X_stack_class, y_stack_class, X_predict_class
+    
+    def create_value_columns(df, metric):
+
+        for c in df.columns:
+            if metric in c:
+                df[c + '_vs_value'] = df[c] - df.value
+                df[c + '_over_value'] = df[c] / df.value
+
+        return df
+    
+
+    def join_train_features(X_stack_player, X_stack_class, y_stack_class):
+
+        X_stack_class = pd.merge(X_stack_class, X_stack_player, on=['player', 'week', 'year'], how='left')
+        X_stack_class = X_stack_class.drop(['player', 'week', 'year'], axis=1).dropna(axis=0)
+        y_stack_class = y_stack_class[y_stack_class.index.isin(X_stack_class.index)]
+        X_stack_class, y_stack_class = X_stack_class.reset_index(drop=True), y_stack_class.reset_index(drop=True)
+
+        return X_stack_class, y_stack_class
+    
+    def join_predict_features(df_predict, X_predict, X_predict_class):
+        X_predict_player = pd.concat([df_predict.player, X_predict.copy()], axis=1)
+        X_predict_player = X_predict_player.loc[:,~X_predict_player.columns.duplicated()].copy()
+        X_predict_class = pd.merge(X_predict_class, X_predict_player, on=['player'])
+        X_predict_class = X_predict_class.drop(['player'], axis=1)
+        return X_predict_class
+    
+    def create_value_compare_col(X):
+        for c in X.columns:
+            if 'class' not in c:
+                X[c + '_vs_value'] = X[c] - X.value
+                X[c + '_over_value'] = X[c] / X.value
+        return X
+    
+
+#-----------------------
 # Saving validations
 #-----------------------
 
@@ -539,7 +619,7 @@ def load_stack_runs(model_output_path, fname):
     return stack_in['best_models'], stack_in['scores'], stack_in['stack_val_pred']
 
 
-def save_output_to_db(output, run_params):
+def save_output_to_db(output, run_params, pred_type='regression'):
     d = str(run_params['test_time_split'])
     d = dt.date(int(d[:4]), int(d[4:6]), int(d[6:]))
 
@@ -548,15 +628,17 @@ def save_output_to_db(output, run_params):
     output['ensemble_vers'] = ensemble_vers
     output['std_dev_type'] = std_dev_type
     output['game_date'] = d
+    output['pred_type'] = pred_type
 
     output = output[['player', 'game_date', 'metric', 'pred_fp_per_game', 'std_dev', 'min_score', 'max_score',
-                     'pred_vers', 'ensemble_vers', 'std_dev_type']]
+                     'pred_vers', 'ensemble_vers', 'std_dev_type', 'pred_type']]
 
     del_str = f'''pred_vers='{pred_vers}'
                   AND metric='{metric}'
                   AND ensemble_vers='{ensemble_vers}' 
                   AND std_dev_type='{std_dev_type}'
                   AND game_date={d} 
+                  AND pred_type='{pred_type}'
                 '''
     dm.delete_from_db('Simulation', 'Model_Predictions', del_str, create_backup=False)
     dm.write_to_db(output, 'Simulation', f'Model_Predictions', 'append')
@@ -568,8 +650,6 @@ def save_output_to_db(output, run_params):
 # General Setting
 #==========
 
-
-
 #---------------
 # Settings
 #---------------
@@ -578,8 +658,8 @@ run_params = {
     
     # set year and week to analyze
     'cv_time_input_orig': '2023-02-03',
-    'train_date_orig': '2023-02-13',
-    'test_time_split_orig': '2023-02-14',
+    'train_date_orig': '2023-02-16',
+    'test_time_split_orig': '2023-02-24',
     'metrics': ['points', 'rebounds', 'assists', 'three_pointers'],
 
     'n_iters': 25,
@@ -619,6 +699,7 @@ for metric in run_params['metrics']:
     # load data and filter down
     pkey, model_output_path = create_pkey_output_path(metric, run_params, pred_vers)
     df, run_params = load_data(run_params)
+    output_teams = df.loc[df.game_date==run_params['test_time_split'], ['player', 'team', 'opponent']]
 
     df = df.drop([c for c in df.columns if 'y_act' in c and metric not in c], axis=1)
     df = df.rename(columns={f'y_act_{metric}': 'y_act'})
@@ -714,90 +795,72 @@ for metric in run_params['metrics']:
 
     save_output_to_db(output, run_params)
 
+    #-------------
+    # Running the million dataset
+    #-------------
+
+    df_predict_mil, X_stack_mil, y_stack_mil, X_predict_mil = X_y_stack_class(df, metric, run_params)
+    X_stack_mil, y_stack_mil = join_train_features(X_stack_player, X_stack_mil, y_stack_mil)
+    X_predict_mil = join_predict_features(df_predict, X_predict, X_predict_mil)
+    X_stack_mil = create_value_compare_col(X_stack_mil)
+    X_predict_mil = create_value_compare_col(X_predict_mil)
+
+    # class metrics
+    final_models = ['lr_c', 'lgbm_c', 'rf_c', 'gbm_c', 'gbmh_c', 'xgb_c', 'knn_c']
+
+    if os.path.exists(f'{model_output_path}class_{std_dev_type}.p'):
+        best_models, scores, stack_val_pred_mil = load_stack_runs(model_output_path, 'class_' + std_dev_type)
+    else:
+        stack_val_pred_mil = pd.DataFrame(); scores = []; best_models = []
+        for i, fm in enumerate(final_models):
+            best_models, scores, stack_val_pred_mil = run_stack_models(fm, i, X_stack_mil, y_stack_mil, best_models, 
+                                                                    scores, stack_val_pred_mil, model_obj='class',
+                                                                    show_plots=False, num_k_folds=num_k_folds,
+                                                                    print_coef=print_coef)
+
+        if show_plot: show_calibration_curve(y_stack_mil, stack_val_pred_mil[fm], n_bins=8)
+        save_stack_runs(model_output_path, 'class_' + std_dev_type, best_models, scores, stack_val_pred_mil)
+
+    predictions = stack_predictions(X_predict_mil, best_models, final_models, model_obj='class')
+    best_val_mil, best_predictions_mil, _ = average_stack_models(scores, final_models, y_stack_mil, stack_val_pred_mil, 
+                                                                predictions, model_obj='class', show_plot=show_plot, 
+                                                                min_include=min_include)
+
+    if show_plot: show_calibration_curve(y_stack_mil, best_val_mil.mean(axis=1), n_bins=8)
+
+    output_class = pd.concat([df_predict_mil[['player', 'game_date', 'value']], 
+                              pd.Series(best_predictions_mil.mean(axis=1), name='prob_over')], axis=1)
+    output_class = pd.merge(output_class, output_teams, on=['player'])
+    output_class = output_class.assign(metric=metric)
+    output_join = np.round(output[['player', 'pred_fp_per_game', 'std_dev', 'min_score', 'max_score']],1)
+    output_join.columns = ['player', 'pred_fp_per_game', 'std_dev', 'min_value', 'max_value']
+
+    output_class = pd.merge(output_class, output_join,on=['player'])
+
+    output_class = output_class[['player', 'game_date', 'team', 'opponent', 'metric', 'value', 'prob_over',
+                                 'pred_fp_per_game', 'std_dev', 'min_value', 'max_value']]
+    try:
+        output_class = add_actual(output_class)
+        output_class['is_over'] = np.where(output_class[f'actual_{metric}'] >= output_class.value, 1, 0)
+    except:
+        pass
+
+    output_class = output_class.rename(columns={'pred_fp_per_game': 'pred_value'})
+    output_class = output_class.sort_values(by='prob_over', ascending=False)
+    display(output_class)
+
+    del_str = f'''metric='{metric}'
+                  AND game_date={run_params['test_time_split']} 
+                '''
+    dm.delete_from_db('Simulation', 'Over_Probability', del_str, create_backup=False)
+    dm.write_to_db(output_class,'Simulation', 'Over_Probability', 'append')
 
 #%%
 
-def pull_odds(metric):
 
-    odds = dm.read(f'''SELECT player, stat_type, game_date year, value, over_under
-                       FROM Draftkings_Odds 
-                    ''', 'Player_Stats')
-    odds.stat_type = odds.stat_type.apply(lambda x: x.lower())
-    odds.year = odds.year.apply(lambda x: int(x.replace('-', '')))
 
-    odds = odds[odds.stat_type==metric].reset_index(drop=True)
-    odds = odds.loc[odds.over_under=='over', ['player', 'year', 'value']]
-
-    return odds
-
-def get_over_under_class(df, metric, run_params):
-    
-    odds = pull_odds(metric)
-    df = pd.merge(df, odds, on=['player', 'year'])
-    df['y_act'] = np.where(df.y_act > df.value, 1, 0)
-
-    df_train, df_predict, output_start, min_samples = train_predict_split(df, run_params)
-    
-    return df_train, df_predict, output_start, min_samples
-
-def X_y_stack_class(df, metric, run_params):
-
-    df_train_class, df_predict_class, _, _ = get_over_under_class(df, metric, run_params)
-
-    # load the regregression predictions
-    pred, actual, models_class, _, full_hold_class = load_all_pickles(model_output_path, 'class')
-    X_stack_class, y_stack_class, df_labels = X_y_stack('class', full_hold_class)
-    X_stack_class = pd.concat([df_labels[['player', 'week', 'year']], X_stack_class], axis=1)
-
-    _, X, y = get_skm(df_train_class, 'class', to_drop=run_params['drop_cols'])
-    X_predict_class = create_stack_predict(df_predict_class, models_class, X, y, proba=True)
-    X_predict_class = pd.concat([df_predict_class.player, X_predict_class], axis=1)
-    return df_predict_class, X_stack_class, y_stack_class, X_predict_class
-
- #-------------
-# Running the million dataset
-#-------------
-
-df_predict_mil, X_stack_mil, y_stack_mil, X_predict_mil = X_y_stack_class(df, metric, run_params)
-
-X_stack_mil = pd.merge(X_stack_mil, X_stack_player, on=['player', 'week', 'year'], how='left')
-
-X_predict_player = pd.concat([df_predict.player, X_predict.copy()], axis=1)
-X_predict_player = X_predict_player.loc[:,~X_predict_player.columns.duplicated()].copy()
-X_predict_mil = pd.merge(X_predict_mil, X_predict_player, on=['player'])
-
-X_stack_mil = X_stack_mil.drop(['player', 'week', 'year'], axis=1).dropna(axis=0)
-y_stack_mil = y_stack_mil[y_stack_mil.index.isin(X_stack_mil.index)]
-X_stack_mil, y_stack_mil = X_stack_mil.reset_index(drop=True), y_stack_mil.reset_index(drop=True)
-
-X_predict_mil = X_predict_mil.drop(['player'], axis=1)
-
-# class metrics
-final_models = ['lr_c', 'lgbm_c', 'rf_c', 'gbm_c', 'gbmh_c', 'xgb_c', 'knn_c']
-
-if os.path.exists(f'{model_output_path}mil_{std_dev_type}.p'):
-    best_models, scores, stack_val_pred_mil = load_stack_runs(model_output_path, 'class_' + std_dev_type)
-else:
-    stack_val_pred_mil = pd.DataFrame(); scores = []; best_models = []
-    for i, fm in enumerate(final_models):
-        best_models, scores, stack_val_pred_mil = run_stack_models(fm, i, X_stack_mil, y_stack_mil, best_models, 
-                                                                   scores, stack_val_pred_mil, model_obj='class',
-                                                                   show_plots=False, num_k_folds=num_k_folds,
-                                                                   print_coef=print_coef)
-
-    if show_plot: show_calibration_curve(y_stack_mil, stack_val_pred_mil[fm], n_bins=8)
-    save_stack_runs(model_output_path, 'class_' + std_dev_type, best_models, scores, stack_val_pred_mil)
-
-predictions = stack_predictions(X_predict_mil, best_models, final_models, model_obj='class')
-best_val_mil, best_predictions_mil, _ = average_stack_models(scores, final_models, y_stack_mil, stack_val_pred_mil, 
-                                                            predictions, model_obj='class', show_plot=show_plot, 
-                                                            min_include=min_include)
-
-if show_plot: show_calibration_curve(y_stack_mil, best_val_mil.mean(axis=1), n_bins=8)
-# save_mil_data(df_predict_mil, best_predictions_mil, best_val_mil, run_params)
 
 #%%
-
 def pull_predictions(pull_date):
     df = dm.read(f'''SELECT player, metric, pred_fp_per_game, std_dev, min_score, max_score
                      FROM Model_Predictions 

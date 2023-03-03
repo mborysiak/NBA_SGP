@@ -77,9 +77,9 @@ def forward_fill(df, cols=None):
 
 def fantasy_data():
 
-    fd = dm.read(f'''SELECT * 
+    fd = dm.read(f'''SELECT *, 100*three_pointers/three_point_pct as three_pointers_att
                     FROM FantasyData 
-                    ''', 'Player_Stats')
+                    ''', 'Player_Stats').fillna({'three_pointers_att': 0})
     fd = fd.drop(['rank'], axis=1)
     fd.columns = ['fd_' + c if c not in ('player', 'team', 'position', 'opponent', 'game_date') else c for c in fd.columns ]
 
@@ -271,18 +271,18 @@ def rolling_proj_stats(df):
 #     return df
 
 
-# def proj_market_share(df, proj_col_name):
+def proj_market_share(df, proj_col_name):
 
-#     proj_cols = [c for c in df.columns if proj_col_name in c]
+    proj_cols = [c for c in df.columns if proj_col_name in c]
 
-#     for proj_col in proj_cols:
-#         orig_col = proj_col.replace(proj_col_name, '')
-#         if orig_col in df.columns:
-#             df[f'{proj_col_name}share_{orig_col}'] = df[orig_col] / (df[proj_col]+3)
-#             df[f'{proj_col_name}share_diff_{orig_col}'] = df[orig_col] - df[proj_col]
-#             df[[f'{proj_col_name}share_{orig_col}', f'{proj_col_name}share_diff_{orig_col}']] = \
-#                 df[[f'{proj_col_name}share_{orig_col}', f'{proj_col_name}share_diff_{orig_col}']].fillna(0)
-#     return df
+    for proj_col in proj_cols:
+        orig_col = proj_col.replace(proj_col_name, '')
+        if orig_col in df.columns:
+            df[f'{proj_col_name}share_{orig_col}'] = df[orig_col] / (df[proj_col]+3)
+            df[f'{proj_col_name}share_diff_{orig_col}'] = df[orig_col] - df[proj_col]
+            df[[f'{proj_col_name}share_{orig_col}', f'{proj_col_name}share_diff_{orig_col}']] = \
+                df[[f'{proj_col_name}share_{orig_col}', f'{proj_col_name}share_diff_{orig_col}']].fillna(0)
+    return df
 
 
 # def results_vs_predicted(df, col):
@@ -426,8 +426,10 @@ def add_team_box_score(df, team_or_opp):
     team_bs = dm.read("SELECT * FROM Box_Score", 'Team_Stats')
     team_bs  = team_bs.rename(columns={'TEAM_ABBREVIATION': team_or_opp})
 
-    team_bs = team_bs.drop(['GAME_ID', 'MIN', 'TEAM_ID', 'TEAM_CITY', 'TEAM_NAME'], axis=1)
+    team_bs = team_bs.drop(['GAME_ID', 'TEAM_ID', 'TEAM_CITY', 'TEAM_NAME'], axis=1)
     team_bs = team_bs.sort_values(by=[team_or_opp, 'game_date']).reset_index(drop=True)
+    team_bs = cleanup_minutes(team_bs)
+    team_bs['is_overtime'] = np.where(team_bs.MIN > 240, 1, 0)
 
     r_cols = [c for c in team_bs.columns if c not in (team_or_opp, 'game_date')]
     team_bs = add_rolling_stats(team_bs, gcols=[team_or_opp], rcols=r_cols)
@@ -435,6 +437,7 @@ def add_team_box_score(df, team_or_opp):
         
     team_bs.game_date = team_bs.groupby(team_or_opp)['game_date'].shift(-1)
     team_bs = team_bs.fillna({'game_date': max_date})
+
     team_bs.columns = [f'{team_or_opp}_{c}' if c not in (team_or_opp, 'game_date') else c for c in team_bs.columns]
     df = pd.merge(df, team_bs, on=[team_or_opp, 'game_date'], how='left')
 
@@ -476,6 +479,26 @@ def add_team_tracking(df, team_or_opp):
 
     return df
 
+
+def remove_low_corrs(df, threshold):
+
+    orig_cols = df.shape[1]
+    obj_cols = list(df.dtypes[df.dtypes=='object'].index)
+    corrs = pd.DataFrame(np.corrcoef(df.dropna().drop(obj_cols, axis=1).values, rowvar=False), 
+                            columns=[c for c in df.columns if c not in obj_cols],
+                            index=[c for c in df.columns if c not in obj_cols])
+    corrs = corrs[[y for y in corrs.columns if 'y_act' in y]]
+    corrs = corrs[~corrs.index.str.contains('y_act')]
+    good_corrs = list(corrs[abs(corrs) >= threshold].dropna(how='all').index)
+
+    obj_cols.extend(good_corrs)
+    obj_cols.extend(corrs.columns)
+
+    print(f'Kept {len(obj_cols)}/{orig_cols} columns')
+
+    return df[obj_cols]
+
+
 #%%
 
 max_date = dm.read("SELECT max(game_date) FROM FantasyData", 'Player_Stats').values[0][0]
@@ -488,19 +511,23 @@ df = forward_fill(df)
 df = df.dropna().reset_index(drop=True)
 df = df[(df.fd_points>0) & (df.fp_points>0) & (df.nf_points>0)].reset_index(drop=True)
 df = rolling_proj_stats(df)
+print(df.shape)
 
 # get box score stats and join to filter to players with minutes played
 box_score = get_box_score()
 df = pd.merge(df, box_score.loc[box_score.MIN>0, ['player', 'game_date', 'MIN']], on=['player', 'game_date'], how='left')
 df = df[(df.game_date==max_date) | ~(df.MIN.isnull())]
+print(df.shape)
 
 # roll the box score stats and shift back a game
 box_score_roll = box_score_rolling(box_score)
 df = pd.merge(df, box_score_roll, on=['player', 'game_date'])
+print(df.shape)
 
 # add the rolling advanced stats and tracking stats
 df = add_advanced_stats(df)
 df = add_tracking_stats(df)
+print(df.shape)
 
 # add team stats
 df = add_team_box_score(df, 'team')
@@ -509,11 +536,17 @@ df = add_team_advanced_stats(df, 'team')
 df = add_team_advanced_stats(df, 'opponent')
 df = add_team_tracking(df, 'team')
 df = add_team_tracking(df, 'opponent')
+print(df.shape)
 
 df = forward_fill(df)
 
 df = add_y_act(df, box_score)
 df = df.dropna(axis=0, subset=[c for c in df.columns if 'y_act' not in c]).reset_index(drop=True)
+print(df.shape)
+
+df = remove_low_corrs(df, threshold=0.05)
+print(df.game_date.max())
+print(df.shape)
 
 #%%
 
@@ -527,3 +560,59 @@ if df.shape[1] > 2000:
 #     df.loc[df.TEAM_ABBREVIATION=='NYK', 'TEAM_ABBREVIATION'] = 'NY'
 #     df.loc[df.TEAM_ABBREVIATION=='SAS', 'TEAM_ABBREVIATION'] = 'SA'
 #     dm.write_to_db(df, 'Player_Stats', t, 'replace', True)
+
+#%%
+
+max_date = dm.read("SELECT max(game_date) FROM FantasyData", 'Player_Stats').values[0][0]
+
+df = fantasy_data()
+df = fantasy_pros(df)
+df = numberfire(df)
+df= consensus_fill(df)
+df = forward_fill(df)
+df = df.dropna().reset_index(drop=True)
+
+#%%
+
+team_stats = dm.read('''
+                        SELECT *, 100*three_pointers / three_point_pct as three_pointers_att
+                        FROM (
+                        SELECT *,
+                                row_number() OVER(PARTITION BY team, game_date ORDER BY points DESC) rn
+                        FROM FantasyData
+                        )
+                        WHERE rn <= 8
+                    ''', 'Player_Stats')
+
+team_stats = team_stats.groupby(['team', 'game_date']).agg({
+                                                        'points': 'sum',
+                                                        'rebounds': 'sum',
+                                                        'assists': 'sum',
+                                                        'blocks': 'sum',
+                                                        'steals': 'sum',
+                                                        'ft_made': 'sum',
+                                                        'two_point_made':'sum',
+                                                        'three_pointers': 'sum',
+                                                        'turnovers': 'sum',
+                                                        'minutes': 'sum',
+                                                        'three_pointers_att': 'sum'
+                                                        }).reset_index()
+
+team_stats.columns = [f'team_fd_{c}' if c not in ('team', 'game_date') else c for c in team_stats.columns]
+
+df = pd.merge(df, team_stats, on=['team', 'game_date'], how='left')
+
+for c in df.columns:
+    if '_fd_' in c and 'team' not in c:
+        df['sh']
+df[[c for c in df.columns if '_fd_' in c and 'team' not in c]] / df[[c for c in df.columns if '_fd_' in c and 'team' in c]]
+
+
+
+# %%
+missing = df[(df.fd_points==0) | ((df.fp_points==0) & (df.nf_points==0))].reset_index(drop=True)
+missing.loc[(missing.player=='Aaron Gordon'), 
+            ['player', 'opponent', 'game_date', 'fd_points', 'fp_points', 'nf_points', 'avg_proj_points']]
+# %%
+df.loc[df.player=='Aaron Gordon', ['player', 'opponent', 'game_date', 'fd_points', 'fp_points', 'nf_points', 'avg_proj_points']]
+# %%

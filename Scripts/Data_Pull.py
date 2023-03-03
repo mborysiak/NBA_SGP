@@ -16,9 +16,8 @@ root_path = ffgeneral.get_main_path('NBA_SGP')
 db_path = f'{root_path}/Data/'
 dm = DataManage(db_path)
 
-
 pd.set_option('display.max_columns', None)
-pd.set_option('display.max_rows', None)
+pd.set_option('display.max_rows', 100)
 
 #%%
 
@@ -157,7 +156,30 @@ class DKScraper():
                                     pass
                 
         return props
+    
+    @staticmethod
+    def clean_stat_cat(df):
+        stat_map = {
+                'Points': 'points', 
+                'Points - 1st Quarter': 'points_first_quarter', 
+                'Rebounds': 'rebounds',
+                'Rebounds - 1st Quarter': 'rebounds_first_quarter', 
+                'Assists': 'assists', 
+                'Pts + Reb + Ast': 'points_rebounds_assists',
+                'Pts + Reb': 'points_rebounds', 
+                'Pts + Ast': 'points_assists', 
+                'Ast + Reb': 'assists_rebounds',
+                'Assists + Rebounds': 'assists_rebounds', 
+                'Blocks': 'blocks', 
+                'Steals': 'steals',
+                'Steals + Blocks': 'steals_blocks', 
+                'Threes': 'three_pointers', 
+                'Assists - 1st Quarter': 'assists_first_quarter'
+            }
+        df.stat_type = df.stat_type.apply(lambda x: x.lstrip().rstrip())
+        df.stat_type = df.stat_type.map(stat_map)
 
+        return df
 
     def dict_to_df(self, props):
         players = []
@@ -175,13 +197,15 @@ class DKScraper():
                     ou_values.append(v[0])
                     decimal_odds.append(v[1])
 
-        return pd.DataFrame({
+        df = pd.DataFrame({
                     'player': players,
                     'stat_type': stats_types,
                     'over_under': over_unders,
                     'value': ou_values,
                     'decimal_odds': decimal_odds
                     })
+        df = self.clean_stat_cat(df)
+        return df
 
 #%%
 nba_scrape = DKScraper(base_url='https://sportsbook.draftkings.com//sites/US-NJ-SB/api/v5/eventgroups/', event_group_id=42648)
@@ -189,7 +213,6 @@ props = nba_scrape.nba_props_dk()
 props_df = nba_scrape.dict_to_df(props)
 props_df['game_date'] = dt.datetime.now().date()
 props_df.player = props_df.player.apply(dc.name_clean)
-props_df.loc[props_df.stat_type=='Threes', 'stat_type'] = 'three_pointers'
 
 props_df.head(10)
 
@@ -404,7 +427,7 @@ nba_stats = NBAStats()
 
 #%%
 import time
-yesterday_date = dt.datetime(2023, 2, 24).date()
+yesterday_date = dt.datetime(2023, 3, 1).date()
 
 box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score', yesterday_date)
 time.sleep(5)

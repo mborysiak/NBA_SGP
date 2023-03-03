@@ -39,10 +39,14 @@ dm = DataManage(db_path)
 run_params = {
     
     # set year and week to analyze
-    'cv_time_input': '2023-02-03',
-    'train_time_split': '2023-02-25',
-    'metrics': ['points', 'rebounds', 'assists', 'three_pointers'],
-
+    'cv_time_input': '2023-02-05',
+    'train_time_split': '2023-03-02',
+    'metrics': [
+                #'points','points_assists', 'points_rebounds', 
+                'points_rebounds_assists','three_pointers','assists', 'rebounds',  
+                #'steals', 'blocks','steals_blocks'
+                ],
+    # 'metrics': [ ],
     'n_iters': 25,
     'n_splits': 5
 }
@@ -106,6 +110,57 @@ def train_predict_split(df, run_params):
 
     return df_train, df_predict, output_start, min_samples
 
+#------------------
+# Create Odds Modeling Columns
+#------------------
+
+
+def create_metric_split_columns(df, metric_split):
+    if len(metric_split)==2:
+        ms1 = metric_split[0]
+        ms2 = metric_split[1]
+
+        for c in df.columns:
+            if ms1 in c:
+                try: df[f'{c}_{ms2}'] = df[c] + df[c.replace(ms1, ms2)]
+                except: pass
+
+    elif len(metric_split)==3:
+        ms1 = metric_split[0]
+        ms2 = metric_split[1]
+        ms3 = metric_split[2]
+
+        for c in df.columns:
+            if ms1 in c:
+                try: df[f'{c}_{ms2}_{ms3}'] = df[c] + df[c.replace(ms1, ms2)] + df[c.replace(ms1, ms3)]
+                except: pass
+
+    return df
+
+
+def create_y_act(df, metric):
+
+    if metric in ('points_assists', 'points_rebounds', 'points_rebounds_assists', 'steals_blocks'):
+        metric_split = metric.split('_')
+        df[f'y_act_{metric}'] = df[['y_act_' + c for c in metric_split]].sum(axis=1)
+        df = create_metric_split_columns(df, metric_split)
+
+    df = df.drop([c for c in df.columns if 'y_act' in c and metric not in c], axis=1)
+    df = df.rename(columns={f'y_act_{metric}': 'y_act'})
+    return df
+
+
+def pull_odds(metric):
+
+    odds = dm.read(f'''SELECT player, game_date year, value
+                       FROM Draftkings_Odds 
+                       WHERE stat_type='{metric}'
+                             AND over_under='over'
+                    ''', 'Player_Stats')
+    odds.year = odds.year.apply(lambda x: int(x.replace('-', '')))
+
+    return odds
+
 def create_value_columns(df, metric):
 
     for c in df.columns:
@@ -114,19 +169,6 @@ def create_value_columns(df, metric):
             df[c + '_over_value'] = df[c] / df.value
 
     return df
-
-def pull_odds(metric):
-
-    odds = dm.read(f'''SELECT player, stat_type, game_date year, value, over_under
-                       FROM Draftkings_Odds 
-                    ''', 'Player_Stats')
-    odds.stat_type = odds.stat_type.apply(lambda x: x.lower())
-    odds.year = odds.year.apply(lambda x: int(x.replace('-', '')))
-
-    odds = odds[odds.stat_type==metric].reset_index(drop=True)
-    odds = odds.loc[odds.over_under=='over', ['player', 'year', 'value']]
-
-    return odds
 
 def get_over_under_class(df, metric):
     
@@ -300,9 +342,8 @@ for metric in run_params['metrics']:
     # load data and filter down
     pkey, model_output_path = create_pkey_output_path(metric, run_params, vers)
     df, run_params = load_data(run_params)
-
-    df = df.drop([c for c in df.columns if 'y_act' in c and metric not in c], axis=1)
-    df = df.rename(columns={f'y_act_{metric}': 'y_act'})
+    df = create_y_act(df, metric)
+    
     df['week'] = 1
     df['year'] = df.game_date
     df['team'] = 0
@@ -333,6 +374,7 @@ for metric in run_params['metrics']:
     model_list = ['gbm_q', 'lgbm_q', 'qr_q', 'knn_q', 'rf_q']
     for i, m in enumerate(model_list):
         for alph in [0.1, 0.25, 0.75, 0.9]:
+            print('\n', 'Quantile:', alph, '\n-----------')
             out_quant, _, _ = get_model_output(m, df_train, 'quantile', out_quant, run_params, i, alpha=alph)
     save_output_dict(out_quant, model_output_path, 'quant')
 # %%

@@ -39,11 +39,12 @@ dm = DataManage(db_path)
 run_params = {
     
     # set year and week to analyze
-    'cv_time_input': '2023-02-05',
-    'train_time_split': '2023-03-02',
+    'cv_time_input': '2023-02-06',
+    'train_time_split': '2023-03-06',
     'metrics': [
-                #'points','points_assists', 'points_rebounds', 
-                'points_rebounds_assists','three_pointers','assists', 'rebounds',  
+             #   'points_assists', 'points_rebounds', 
+             #   'three_pointers',
+                'points_rebounds_assists','points', 'assists', 'rebounds',  
                 #'steals', 'blocks','steals_blocks'
                 ],
     # 'metrics': [ ],
@@ -156,6 +157,8 @@ def pull_odds(metric):
                        FROM Draftkings_Odds 
                        WHERE stat_type='{metric}'
                              AND over_under='over'
+                             AND decimal_odds < 2.5
+                             AND decimal_odds > 1.5
                     ''', 'Player_Stats')
     odds.year = odds.year.apply(lambda x: int(x.replace('-', '')))
 
@@ -170,14 +173,16 @@ def create_value_columns(df, metric):
 
     return df
 
-def get_over_under_class(df, metric):
+def get_over_under_class(df, metric, run_params):
     
     odds = pull_odds(metric)
     df = pd.merge(df, odds, on=['player', 'year'])
+    df = df.sort_values(by='game_date').reset_index(drop=True)
     df['y_act'] = np.where(df.y_act > df.value, 1, 0)
     df = create_value_columns(df, metric)
+    df_train_class, df_predict_class, _, _ = train_predict_split(df, run_params)
 
-    return df
+    return df_train_class, df_predict_class
 
 #----------------
 # Modeling Functions
@@ -350,7 +355,8 @@ for metric in run_params['metrics']:
 
     df_train, df_predict, output_start, min_samples = train_predict_split(df, run_params)
     df_train['y_act'] = df_train.y_act + (np.random.random(size=len(df_train)) / 1000)
-    df_train_class = get_over_under_class(df, metric)
+    df_train_class, df_predict_class = get_over_under_class(df, metric, run_params)
+    print(df_train_class.game_date.max())
 
     # set up blank dictionaries for all metrics
     out_reg, out_quant, out_class = output_dict(),  output_dict(), output_dict()
@@ -360,21 +366,61 @@ for metric in run_params['metrics']:
     #=========
 
     # run all models
-    model_list = [ 'bridge', 'huber', 'lgbm', 'ridge', 'svr', 'lasso', 'enet', 'xgb', 'knn', 'gbm', 'gbmh', 'rf']
-    for i, m in enumerate(model_list):
-        out_reg, _, _ = get_model_output(m, df_train, 'reg', out_reg, run_params, i, min_samples)
-    save_output_dict(out_reg, model_output_path, 'reg')
+    # model_list = [ 'bridge', 'huber', 'lgbm', 'ridge', 'svr', 'lasso', 'enet', 'xgb', 'knn', 'gbm', 'gbmh', 'rf']
+    # for i, m in enumerate(model_list):
+    #     out_reg, _, _ = get_model_output(m, df_train, 'reg', out_reg, run_params, i, min_samples)
+    # save_output_dict(out_reg, model_output_path, 'reg')
 
     model_list = ['lr_c', 'xgb_c',  'lgbm_c', 'gbm_c', 'rf_c', 'knn_c', 'gbmh_c'] 
     for i, m in enumerate(model_list):
         out_class, _, _= get_model_output(m, df_train_class, 'class', out_class, run_params, i, min_samples)
     save_output_dict(out_class, model_output_path, 'class')
 
-    # run all other models
-    model_list = ['gbm_q', 'lgbm_q', 'qr_q', 'knn_q', 'rf_q']
-    for i, m in enumerate(model_list):
-        for alph in [0.1, 0.25, 0.75, 0.9]:
-            print('\n', 'Quantile:', alph, '\n-----------')
-            out_quant, _, _ = get_model_output(m, df_train, 'quantile', out_quant, run_params, i, alpha=alph)
-    save_output_dict(out_quant, model_output_path, 'quant')
+    # # run all other models
+    # model_list = ['gbm_q', 'lgbm_q', 'qr_q', 'knn_q', 'rf_q']
+    # for i, m in enumerate(model_list):
+    #     for alph in [0.1, 0.25, 0.75, 0.9]:
+    #         print('\n', 'Quantile:', alph, '\n-----------')
+    #         out_quant, _, _ = get_model_output(m, df_train, 'quantile', out_quant, run_params, i, alpha=alph)
+    # save_output_dict(out_quant, model_output_path, 'quant')
+# %%
+cur_df = df_train_class.copy()
+model_obj = 'class'
+model_name = 'lr_c'
+alpha=None
+i=0
+skm, X, y = get_skm(cur_df, model_obj, to_drop=run_params['drop_cols'])
+pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples)
+
+if model_obj == 'class': proba = True
+else: proba = False
+
+# fit and append the ADP model
+import time
+start = time.time()
+best_models, oof_data, _ = skm.time_series_cv(pipe, X, y, params, n_iter=run_params['n_iters'], 
+                                                n_splits=run_params['n_splits'], col_split='game_date', 
+                                                bayes_rand='custom_rand', time_split=run_params['cv_time_input'],
+                                                proba=proba, random_seed=(i+7)*19+(i*12)+6, alpha=alpha)
+
+
+# %%
+skm.X_train
+# %%
+
+skm.X_hold
+# %%
+skm.y_hold
+# %%
+skm.y_train
+# %%
+
+x_val = []
+for tr, te in skm.cv_time_train:
+    X_val = skm.X_train.loc[te, :]
+    x_val.extend(X_val.index)
+    
+
+# %%
+skm.get_y_val()
 # %%

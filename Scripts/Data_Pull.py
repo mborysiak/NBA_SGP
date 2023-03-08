@@ -28,22 +28,16 @@ class DKScraper():
         self.event_group_id = event_group_id
         self.base_api = requests.get(f"{base_url}/{event_group_id}?format=json").json()
 
-    def nfl_games_dk(self, half=0):
+    def nba_games_dk(self):
         """
         Scrapes current NFL game lines.
         Returns
         -------
         games : dictionary containing teams, spreads, totals, moneylines, home/away, and opponent.
         """
-        if half == 0:
-            dk_api = requests.get("https://sportsbook.draftkings.com//sites/US-NJ-SB/api/v5/eventgroups/88808?format=json").json()
-            dk_markets = dk_api['eventGroup']['offerCategories'][0]['offerSubcategoryDescriptors'][0]['offerSubcategory']['offers']
-        elif half == 1:
-            dk_api = requests.get("https://sportsbook.draftkings.com//sites/US-NJ-SB/api/v5/eventgroups/88808/categories/526?format=json").json()
-            for i in dk_api['eventGroup']['offerCategories']:
-                if i['name'] == 'Halves':
-                        dk_markets = i['offerSubcategoryDescriptors'][0]['offerSubcategory']['offers']
         
+        dk_markets = self.base_api['eventGroup']['offerCategories'][0]['offerSubcategoryDescriptors'][0]['offerSubcategory']['offers']
+      
         games = {}
         for i in dk_markets:
             if i[0]['outcomes'][0]['oddsDecimal'] == 0: # Skip this if there is no spread
@@ -53,7 +47,7 @@ class DKScraper():
             
             if away_team not in games: 
                 # Gotta be a better way then a bunch of try excepts
-                games[away_team] = {'location':0}
+                games[away_team] = {'is_home': 0}
                 try:
                     games[away_team]['moneyline'] = i[2]['outcomes'][0]['oddsDecimal']
                 except:
@@ -76,7 +70,7 @@ class DKScraper():
                 games[away_team]['opponent'] = home_team
             
             if home_team not in games:
-                games[home_team] = {'location':1}
+                games[home_team] = {'is_home': 1}
                 try:
                     games[home_team]['moneyline'] = i[2]['outcomes'][1]['oddsDecimal']
                 except:
@@ -97,8 +91,23 @@ class DKScraper():
                 except:
                     pass     
                 games[home_team]['opponent'] = away_team
+
+        game_list = []
+        for k, v in games.items():
+            try:
+                cur_game = [k, v['opponent'], v['is_home'], v['moneyline']]
+                cur_game.extend(v['spread'])
+                cur_game.extend(v['over'])
+                cur_game.extend(v['under'])
+                game_list.append(cur_game)
+            except:
+                print(f"{k} vs {v['opponent']}", ' failed')
+
+        game_df = pd.DataFrame(game_list)
+        game_df.columns = ['team', 'opponent', 'is_home', 'moneyline_odds', 'spread', 
+                           'spread_odds', 'over', 'over_odds', 'under', 'under_odds']
                 
-        return games
+        return game_df
 
 
     def get_offer_cats(self):
@@ -152,7 +161,6 @@ class DKScraper():
                                                              'under':[k['outcomes'][1]['line'],
                                                                      k['outcomes'][1]['oddsDecimal']]}
                                 except:
-                                    print(player, market)
                                     pass
                 
         return props
@@ -216,9 +224,16 @@ props_df.player = props_df.player.apply(dc.name_clean)
 
 props_df.head(10)
 
+games_df = nba_scrape.nba_games_dk()
+games_df['game_date'] = dt.datetime.now().date()
+games_df.head(5)
+
 # %%
 dm.delete_from_db('Player_Stats', 'Draftkings_Odds', f"game_date='{dt.datetime.now().date()}'", create_backup=False)
 dm.write_to_db(props_df, 'Player_Stats', 'Draftkings_Odds', 'append')
+
+dm.delete_from_db('Team_Stats', 'Draftkings_Odds', f"game_date='{dt.datetime.now().date()}'", create_backup=False)
+dm.write_to_db(games_df, 'Team_Stats', 'Draftkings_Odds', 'append')
 
 
 #%%
@@ -283,6 +298,7 @@ dm.write_to_db(df, 'Player_Stats', 'FantasyPros', if_exist='append')
 fname = 'fantasy-basketball-projections.csv'
 
 today_date = dt.datetime.now().date()
+# today_date = dt.date(2023, 2, 1)
 date_str = today_date.strftime('%Y%m%d')
 try: os.replace(f"/Users/mborysia/Downloads/{fname}", 
                 f"{root_path}/Data/OtherData/FantasyData/{date_str}_{fname}")
@@ -399,7 +415,7 @@ class NBAStats:
 
     def pull_all_stats(self, stat_cat, game_date):
 
-        self.game_date = game_date#self.get_datetime(game_date)
+        self.game_date = game_date
         games = self.filter_games()
 
         stat_cats = {
@@ -427,7 +443,7 @@ nba_stats = NBAStats()
 
 #%%
 import time
-yesterday_date = dt.datetime(2023, 3, 1).date()
+yesterday_date = dt.datetime(2023, 3, 6).date()
 
 box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score', yesterday_date)
 time.sleep(5)

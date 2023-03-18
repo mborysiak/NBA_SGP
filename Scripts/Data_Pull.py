@@ -106,7 +106,12 @@ class DKScraper():
         game_df = pd.DataFrame(game_list)
         game_df.columns = ['team', 'opponent', 'is_home', 'moneyline_odds', 'spread', 
                            'spread_odds', 'over', 'over_odds', 'under', 'under_odds']
-                
+        
+        game_df.loc[game_df.team.str.contains('Clipper'), 'team'] = 'LAC'
+        game_df.loc[game_df.team.str.contains('Laker'), 'team'] = 'LAL'
+
+        game_df.team = game_df.team.apply(lambda x: x.split(' ')[0])                
+        game_df.opponent = game_df.opponent.apply(lambda x: x.split(' ')[0])
         return game_df
 
 
@@ -232,7 +237,7 @@ games_df.head(5)
 dm.delete_from_db('Player_Stats', 'Draftkings_Odds', f"game_date='{dt.datetime.now().date()}'", create_backup=False)
 dm.write_to_db(props_df, 'Player_Stats', 'Draftkings_Odds', 'append')
 
-dm.delete_from_db('Team_Stats', 'Draftkings_Odds', f"game_date='{dt.datetime.now().date()}'", create_backup=False)
+dm.delete_from_db('Team_Stats', 'Draftkings_Odds', f"game_date='{dt.datetime.now().date()}'", create_backup=True)
 dm.write_to_db(games_df, 'Team_Stats', 'Draftkings_Odds', 'append')
 
 
@@ -443,7 +448,7 @@ nba_stats = NBAStats()
 
 #%%
 import time
-yesterday_date = dt.datetime(2023, 3, 6).date()
+yesterday_date = dt.datetime(2023, 3, 17).date()
 
 box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score', yesterday_date)
 time.sleep(5)
@@ -464,4 +469,16 @@ for df, tname in zip(dfs, tnames):
     dm.write_to_db(df, 'Team_Stats', tname, 'append')
 
 # %%
+# %%
+
+df = dm.read("SELECT * FROM Draftkings_Odds", 'Player_Stats')
+df = df.groupby('game_date').agg({'player': 'count'}).reset_index()
+
+
+# %%
+team = dm.read("SELECT * FROM Draftkings_Odds", 'Team_stats')
+team = team.groupby('game_date').agg({'team': 'count'}).reset_index()
+
+pd.merge(df, team, on='game_date')
+
 # %%

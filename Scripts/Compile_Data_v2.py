@@ -58,9 +58,16 @@ def add_rolling_stats(df, gcols, rcols):
             cur_roll = rolling_stats(df, gcols, rcols, lag, agg_type=agg_func)
             df = pd.concat([df, cur_roll], axis=1)
 
+    # q6_25 = rolling_stats(df, gcols, rcols, 6, agg_type=lambda x: np.percentile(x, 25))
+    # q6_75 = rolling_stats(df, gcols, rcols, 6, agg_type=lambda x: np.percentile(x, 75))
+    # q10_25 = rolling_stats(df, gcols, rcols, 6, agg_type=lambda x: np.percentile(x, 25))
+    # q10_75 = rolling_stats(df, gcols, rcols, 6, agg_type=lambda x: np.percentile(x, 75))
+
     std_6 = rolling_stats(df, gcols, rcols, 6, agg_type='std')
     std_10 = rolling_stats(df, gcols, rcols, 10, agg_type='std')
-    df = pd.concat([df, std_6, std_10], axis=1)
+    df = pd.concat([df, std_6, std_10, 
+                   # q6_25, q6_75, q10_25, q10_75
+                    ], axis=1)
 
     return df
 
@@ -109,6 +116,11 @@ def numberfire(df):
 
     df = pd.merge(df, nf, on=['player', 'game_date'], how='outer')
 
+    return df
+
+
+def fix_fp_returns(df):
+    df.loc[(df.fd_points > 0) & (df.nf_points > 0) & (df.fp_points==0), [c for c in df.columns if 'fp' in c]] = np.nan
     return df
 
 
@@ -566,6 +578,17 @@ def available_stats(df, missing):
 
     return df
 
+
+def add_dk_team_lines(df):
+    lines = dm.read("SELECT * FROM Draftkings_Odds", 'Team_Stats')
+    lines['implied_points_for'] = (lines.over / 2) - (lines.spread/2)
+    lines['implied_points_against'] = (lines.over / 2) + (lines.spread/2)
+    lines = lines[['team', 'game_date', 'moneyline_odds', 'over', 'implied_points_for', 'implied_points_against', 'spread']]
+
+    lines = add_rolling_stats(lines, ['team'], ['moneyline_odds', 'over', 'implied_points_for', 'implied_points_against'])
+    df = pd.merge(df, lines, on=['team', 'game_date'])
+    return df
+
 #%%
 
 max_date = dm.read("SELECT max(game_date) FROM FantasyData", 'Player_Stats').values[0][0]
@@ -573,11 +596,12 @@ max_date = dm.read("SELECT max(game_date) FROM FantasyData", 'Player_Stats').val
 df = fantasy_data()
 df = fantasy_pros(df)
 df = numberfire(df)
+df = fix_fp_returns(df)
 
 missing = df.loc[(df.fd_points==0) | ((df.fp_points==0) & (df.nf_points==0)), 
                  ['player', 'game_date']].copy().reset_index(drop=True)
 
-df= consensus_fill(df)
+df = consensus_fill(df)
 df = forward_fill(df)
 df = df.dropna().reset_index(drop=True)
 
@@ -589,7 +613,7 @@ print(df.shape)
 # get box score stats and join to filter to players with minutes played
 box_score = get_box_score()
 df = pd.merge(df, box_score.loc[box_score.MIN>0, ['player', 'game_date', 'MIN']], on=['player', 'game_date'], how='left')
-df = df[(df.game_date==max_date) | ~(df.MIN.isnull())]
+df = df[(df.game_date==max_date) | ~(df.MIN.isnull())].drop('MIN', axis=1)
 print(df.shape)
 
 # roll the box score stats and shift back a game
@@ -614,13 +638,15 @@ df = add_team_tracking(df, 'team')
 df = add_team_tracking(df, 'opponent')
 print(df.shape)
 
+df = add_dk_team_lines(df)
 df = forward_fill(df)
+print('after team lines', df.shape)
 
 df = add_y_act(df, box_score)
 df = df.dropna(axis=0, subset=[c for c in df.columns if 'y_act' not in c]).reset_index(drop=True)
 print(df.shape)
 
-df = remove_low_corrs(df, threshold=0.07)
+df = remove_low_corrs(df, threshold=0.05)
 print(df.game_date.max())
 print(df.shape)
 
@@ -639,7 +665,7 @@ if df.shape[1] > 2000:
 
 #%%
 
+# %%
 
-
-
+cur_cols = df.columns
 # %%

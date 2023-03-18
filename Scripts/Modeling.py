@@ -39,15 +39,13 @@ dm = DataManage(db_path)
 run_params = {
     
     # set year and week to analyze
-    'cv_time_input': '2023-02-06',
-    'train_time_split': '2023-03-06',
+    'cv_time_input': '2023-02-08',
+    'train_time_split': '2023-03-17',
     'metrics': [
-             #   'points_assists', 'points_rebounds', 
-             #   'three_pointers',
-                'points_rebounds_assists','points', 'assists', 'rebounds',  
+               'points_assists', 'points_rebounds',  'three_pointers', 'points_rebounds_assists',
+                'points', 'assists', 'rebounds',  
                 #'steals', 'blocks','steals_blocks'
                 ],
-    # 'metrics': [ ],
     'n_iters': 25,
     'n_splits': 5
 }
@@ -57,13 +55,14 @@ run_params['train_time_split'] = int(run_params['train_time_split'].replace('-',
 
 # set weights for running model
 r2_wt = 1
+mae_wt = 1
 sera_wt = 0
-mse_wt = 5
+mse_wt = 0
 matt_wt = 0
 brier_wt = 1
 
 # set version and iterations
-vers = 'mse5_rsq1_lowsample_perc'
+vers = 'mae1_rsq1_lowsample_perc'
 
 #----------------
 # Data Loading
@@ -173,13 +172,23 @@ def create_value_columns(df, metric):
 
     return df
 
-def get_over_under_class(df, metric, run_params):
+def remove_low_counts(df):
+    cnts = df.groupby('game_date').agg({'player': 'count'})
+    cnts = cnts[cnts.player > 5].reset_index().drop('player', axis=1)
+    df = pd.merge(df, cnts, on='game_date')
+    return df
+
+def get_over_under_class(df, metric, run_params, model_obj='class'):
     
     odds = pull_odds(metric)
     df = pd.merge(df, odds, on=['player', 'year'])
     df = df.sort_values(by='game_date').reset_index(drop=True)
-    df['y_act'] = np.where(df.y_act > df.value, 1, 0)
+
+    if model_obj == 'class': df['y_act'] = np.where(df.y_act >= df.value, 1, 0)
+    elif model_obj == 'reg': df['y_act'] = df.y_act - df.value
+
     df = create_value_columns(df, metric)
+    df = remove_low_counts(df)
     df_train_class, df_predict_class, _, _ = train_predict_split(df, run_params)
 
     return df_train_class, df_predict_class
@@ -208,7 +217,7 @@ def update_output_dict(label, m, suffix, out_dict, oof_data, best_models):
 def get_skm(skm_df, model_obj, to_drop):
     
     skm_options = {
-        'reg': SciKitModel(skm_df, model_obj='reg', r2_wt=r2_wt, sera_wt=sera_wt, mse_wt=mse_wt),
+        'reg': SciKitModel(skm_df, model_obj='reg', r2_wt=r2_wt, sera_wt=sera_wt, mse_wt=mse_wt, mae_wt=mae_wt),
         'class': SciKitModel(skm_df, model_obj='class', brier_wt=brier_wt, matt_wt=matt_wt),
         'quantile': SciKitModel(skm_df, model_obj='quantile')
     }
@@ -221,14 +230,12 @@ def get_skm(skm_df, model_obj, to_drop):
 
 def get_full_pipe(skm, m, alpha=None, stack_model=False, min_samples=10):
 
-    if m == 'adp':
-        
-        
-        # set up the ADP model pipe
-        pipe = skm.model_pipe([skm.piece('feature_select'), 
-                               skm.piece('std_scale'), 
-                               skm.piece('k_best'),
-                               skm.piece('lr')])
+    if m=='test_class':
+        pipe = skm.model_pipe([
+                            skm.piece('std_scale'),
+                            skm.piece('k_best_c'), 
+                            skm.piece('lr_c')
+                        ])
 
     elif stack_model:
         pipe = skm.model_pipe([
@@ -347,6 +354,7 @@ for metric in run_params['metrics']:
     # load data and filter down
     pkey, model_output_path = create_pkey_output_path(metric, run_params, vers)
     df, run_params = load_data(run_params)
+    df = remove_low_counts(df)
     df = create_y_act(df, metric)
     
     df['week'] = 1
@@ -355,72 +363,81 @@ for metric in run_params['metrics']:
 
     df_train, df_predict, output_start, min_samples = train_predict_split(df, run_params)
     df_train['y_act'] = df_train.y_act + (np.random.random(size=len(df_train)) / 1000)
-    df_train_class, df_predict_class = get_over_under_class(df, metric, run_params)
-    print(df_train_class.game_date.max())
+    df_train_class, df_predict_class = get_over_under_class(df, metric, run_params, model_obj='class')
+    df_train_diff, df_predict_diff = get_over_under_class(df, metric, run_params, model_obj='reg')
 
     # set up blank dictionaries for all metrics
-    out_reg, out_quant, out_class = output_dict(),  output_dict(), output_dict()
+    out_reg, out_quant, out_class, out_diff = output_dict(),  output_dict(), output_dict(), output_dict()
 
     #=========
     # Run Models
     #=========
-
-    # run all models
-    # model_list = [ 'bridge', 'huber', 'lgbm', 'ridge', 'svr', 'lasso', 'enet', 'xgb', 'knn', 'gbm', 'gbmh', 'rf']
-    # for i, m in enumerate(model_list):
-    #     out_reg, _, _ = get_model_output(m, df_train, 'reg', out_reg, run_params, i, min_samples)
-    # save_output_dict(out_reg, model_output_path, 'reg')
-
+    
     model_list = ['lr_c', 'xgb_c',  'lgbm_c', 'gbm_c', 'rf_c', 'knn_c', 'gbmh_c'] 
     for i, m in enumerate(model_list):
         out_class, _, _= get_model_output(m, df_train_class, 'class', out_class, run_params, i, min_samples)
     save_output_dict(out_class, model_output_path, 'class')
 
-    # # run all other models
-    # model_list = ['gbm_q', 'lgbm_q', 'qr_q', 'knn_q', 'rf_q']
-    # for i, m in enumerate(model_list):
-    #     for alph in [0.1, 0.25, 0.75, 0.9]:
-    #         print('\n', 'Quantile:', alph, '\n-----------')
-    #         out_quant, _, _ = get_model_output(m, df_train, 'quantile', out_quant, run_params, i, alpha=alph)
-    # save_output_dict(out_quant, model_output_path, 'quant')
-# %%
-cur_df = df_train_class.copy()
-model_obj = 'class'
-model_name = 'lr_c'
-alpha=None
-i=0
-skm, X, y = get_skm(cur_df, model_obj, to_drop=run_params['drop_cols'])
-pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples)
+    # run all models
+    model_list = [ 'bridge', 'huber', 'lgbm', 'ridge', 'svr', 'lasso', 'enet', 'xgb', 'knn', 'gbm', 'gbmh', 'rf']
+    for i, m in enumerate(model_list):
+        out_reg, _, _ = get_model_output(m, df_train, 'reg', out_reg, run_params, i, min_samples)
+    save_output_dict(out_reg, model_output_path, 'reg')
 
-if model_obj == 'class': proba = True
-else: proba = False
+    # run all models
+    model_list = [ 'bridge', 'huber', 'lgbm', 'ridge', 'svr', 'lasso', 'enet', 'xgb', 'knn', 'gbm', 'gbmh', 'rf']
+    for i, m in enumerate(model_list):
+        out_reg, _, _ = get_model_output(m, df_train_diff, 'reg', out_reg, run_params, i, min_samples)
+    save_output_dict(out_reg, model_output_path, 'diff')
 
-# fit and append the ADP model
-import time
-start = time.time()
-best_models, oof_data, _ = skm.time_series_cv(pipe, X, y, params, n_iter=run_params['n_iters'], 
-                                                n_splits=run_params['n_splits'], col_split='game_date', 
-                                                bayes_rand='custom_rand', time_split=run_params['cv_time_input'],
-                                                proba=proba, random_seed=(i+7)*19+(i*12)+6, alpha=alpha)
+    # run all other models
+    model_list = ['gbm_q', 'lgbm_q', 'qr_q', 'knn_q', 'rf_q']
+    for i, m in enumerate(model_list):
+        for alph in [0.1, 0.25, 0.75, 0.9]:
+            print('\n', 'Quantile:', alph, '\n-----------')
+            out_quant, _, _ = get_model_output(m, df_train, 'quantile', out_quant, run_params, i, alpha=alph)
+    save_output_dict(out_quant, model_output_path, 'quant')
 
+#%%
 
-# %%
-skm.X_train
-# %%
+# cur_df = df_train_class.copy()
+# model_obj = 'class'
+# model_name = 'test_class'
+# alpha=None
+# i=50
 
-skm.X_hold
-# %%
-skm.y_hold
-# %%
-skm.y_train
-# %%
+# skm, X, y = get_skm(cur_df, model_obj, to_drop=run_params['drop_cols'])
+# pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples)
 
-x_val = []
-for tr, te in skm.cv_time_train:
-    X_val = skm.X_train.loc[te, :]
-    x_val.extend(X_val.index)
-    
+# if model_obj == 'class': proba = True
+# else: proba = False
 
-# %%
-skm.get_y_val()
+# # fit and append the ADP model
+# import time
+# start = time.time()
+# best_models, oof_data, _ = skm.time_series_cv(pipe, X, y, params, n_iter=run_params['n_iters'], 
+#                                                 n_splits=run_params['n_splits'], col_split='game_date', 
+#                                                 bayes_rand='custom_rand', time_split=run_params['cv_time_input'],
+#                                                 proba=proba, random_seed=(i+7)*19+(i*12)+6, alpha=alpha)
+# # %%
+
+# pipeline = best_models[0]
+# pipeline.fit(X,y)
+
+# # get the feature names from the original dataset
+# feature_names = X.columns
+
+# # get the indices of the selected features
+# selected_features = pipeline.named_steps['k_best_c'].get_support()
+
+# # filter the feature names to get only the selected features
+# selected_feature_names = feature_names[selected_features]
+
+# # get the sorted indices of the coefficients
+# coef_indices = np.argsort(np.abs(pipeline.named_steps['lr_c'].coef_[0]))[::-1]
+
+# # print the feature names and corresponding coefficients in order
+# for feature, coef in zip(selected_feature_names[coef_indices], pipeline.named_steps['lr_c'].coef_[0][coef_indices]):
+#     print(f'{feature}: {coef:.4f}')
+
 # %%

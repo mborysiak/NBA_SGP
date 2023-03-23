@@ -411,7 +411,39 @@ def add_y_act(df, bs):
 
     return df
 
-def box_score_rolling(bs):
+
+def add_last_game_box_score(df, box_score):
+    
+    box_score = box_score[['player', 'game_date', 'MIN', 'FGM', 'FGA', 'FG_PCT', 'FG3_PCT', 'three_pointers', 'FG3A', 
+                           'FTM', 'FTA', 'OREB', 'DREB', 'rebounds', 'assists', 'steals', 'blocks', 'FT_PCT',
+                            'TO', 'points', 'PLUS_MINUS']]
+    box_score.columns = [f'last_game_{c}' if c not in ('player', 'game_date') else c for c in box_score.columns]
+
+    box_score = box_score.sort_values(by=['player', 'game_date']).reset_index(drop=True)
+    box_score.game_date = box_score.groupby('player')['game_date'].shift(-1)
+    box_score = box_score.fillna({'game_date': max_date})
+    df = pd.merge(df, box_score, on=['player', 'game_date'], how='left')
+
+    return df
+
+
+def remove_no_minutes(df, box_score):
+    df = pd.merge(df, box_score.loc[box_score.MIN>0, ['player', 'game_date', 'MIN']], on=['player', 'game_date'], how='left')
+    df = df[(df.game_date==max_date) | ~(df.MIN.isnull())].reset_index(drop=True)
+    df = df.drop('MIN', axis=1)
+    print('no minutes:', df.shape)
+    return df
+
+def remove_low_minutes(df, box_score):
+   
+    df = pd.merge(df, box_score.loc[box_score.MIN>0, ['player', 'game_date', 'MIN']], on=['player', 'game_date'], how='left')
+    df = df.loc[((df.MIN > df.rmean3_MIN*0.4) & (df.MIN > df.rmean6_MIN*0.4)) | (df.game_date==max_date)].reset_index(drop=True)
+    df = df.drop('MIN', axis=1)
+    print('drop low minutes:', df.shape)
+    return df
+
+
+def box_score_rolling(df, bs):
 
     r_cols = [c for c in bs.columns if c not in ('player', 'team', 'game_date')]
     bs = add_rolling_stats(bs, gcols=['player'], rcols=r_cols)
@@ -421,7 +453,16 @@ def box_score_rolling(bs):
     bs.game_date = bs.groupby('player')['game_date'].shift(-1)
     bs = bs.fillna({'game_date': max_date})
 
-    return bs
+    df = pd.merge(df, bs, on=['player', 'game_date'])
+
+    for c in ['MIN', 'FGM', 'FGA', 'FG_PCT', 'three_pointers',
+              'FG3A', 'FG3_PCT', 'FTM', 'FTA', 'FT_PCT', 'OREB', 'DREB', 'rebounds',
+              'assists', 'steals', 'blocks', 'TO', 'points', 'PLUS_MINUS']:
+        df[f'{c}_last_vs_rmean3'] = df[f'last_game_{c}'] - df[f'rmean3_{c}']
+
+
+
+    return df
 
 def add_advanced_stats(df):
     adv = dm.read("SELECT * FROM Advanced_Stats", 'Player_Stats')
@@ -432,17 +473,33 @@ def add_advanced_stats(df):
     adv = adv.sort_values(by=['player', 'game_date']).reset_index(drop=True)
 
     r_cols = [c for c in adv.columns if c not in ('player', 'game_date')]
-    adv = add_rolling_stats(adv, gcols=['player'], rcols=r_cols)
+    adv_roll = add_rolling_stats(adv, gcols=['player'], rcols=r_cols)
 
-    adv = adv.drop(['E_OFF_RATING', 'OFF_RATING', 'E_DEF_RATING', 'DEF_RATING',
-                  'E_NET_RATING', 'NET_RATING', 'AST_PCT', 'AST_TOV', 'AST_RATIO',
-                  'OREB_PCT', 'DREB_PCT', 'REB_PCT', 'TM_TOV_PCT', 'EFG_PCT', 'TS_PCT',
-                  'USG_PCT', 'E_USG_PCT', 'E_PACE', 'PACE', 'PACE_PER40', 'POSS', 'PIE',
-                  ], axis=1)
-    
-    adv.game_date = adv.groupby('player')['game_date'].shift(-1)
-    adv = adv.fillna({'game_date': max_date})
-    df = pd.merge(df, adv, on=['player', 'game_date'], how='left')
+    adv_roll = adv_roll.drop(['E_OFF_RATING', 'OFF_RATING', 'E_DEF_RATING', 'DEF_RATING',
+                              'E_NET_RATING', 'NET_RATING', 'AST_PCT', 'AST_TOV', 'AST_RATIO',
+                              'OREB_PCT', 'DREB_PCT', 'REB_PCT', 'TM_TOV_PCT', 'EFG_PCT', 'TS_PCT',
+                              'USG_PCT', 'E_USG_PCT', 'E_PACE', 'PACE', 'PACE_PER40', 'POSS', 'PIE',
+                            ], axis=1)
+                
+    adv_roll.game_date = adv_roll.groupby('player')['game_date'].shift(-1)
+    adv_roll = adv_roll.fillna({'game_date': max_date})
+    df = pd.merge(df, adv_roll, on=['player', 'game_date'], how='left')
+
+    return df, adv
+
+
+# add the rolling advanced stats and tracking stats
+def add_last_game_advanced_stats(df, adv_stats):
+    adv_stats_cols = adv_stats.columns
+    adv_stats = adv_stats.rename(columns={k: f'last_game_{k}' for k in adv_stats.columns if k not in ('player', 'game_date')})
+    adv_stats = adv_stats.sort_values(by=['player', 'game_date']).reset_index(drop=True)
+    adv_stats.game_date = adv_stats.groupby('player')['game_date'].shift(-1)
+    adv_stats = adv_stats.fillna({'game_date': max_date})
+    df = pd.merge(df, adv_stats, on=['player', 'game_date'], how='left')
+
+    for c in adv_stats_cols:
+        if c not in ('player', 'game_date'):
+            df[f'{c}_last_vs_rmean3'] = df[f'last_game_{c}'] - df[f'rmean3_{c}']
 
     return df
 
@@ -536,13 +593,13 @@ def remove_low_corrs(df, threshold):
                             columns=[c for c in df.columns if c not in obj_cols],
                             index=[c for c in df.columns if c not in obj_cols])
     
-    corrs = corrs[[y for y in corrs.columns if 'y_act' in y and 'steals' not in y and 'blocks' not in y]]
+    corrs = corrs[[y for y in corrs.columns if 'y_act' in y]]# and 'steals' not in y and 'blocks' not in y]]
     corrs = corrs[~corrs.index.str.contains('y_act')]
     good_corrs = list(corrs[abs(corrs) >= threshold].dropna(how='all').index)
 
+
     obj_cols.extend(good_corrs)
     obj_cols.extend(corrs.columns)
-
     print(f'Kept {len(obj_cols)}/{orig_cols} columns')
 
     return df[obj_cols]
@@ -591,6 +648,7 @@ def add_dk_team_lines(df):
 
 #%%
 
+train_date = '2023-03-21'
 max_date = dm.read("SELECT max(game_date) FROM FantasyData", 'Player_Stats').values[0][0]
 
 df = fantasy_data()
@@ -610,22 +668,19 @@ df = add_proj_market_share(df)
 df = rolling_proj_stats(df)
 print(df.shape)
 
-# get box score stats and join to filter to players with minutes played
+# get box score stats androll the box score stats and shift back a game
 box_score = get_box_score()
-df = pd.merge(df, box_score.loc[box_score.MIN>0, ['player', 'game_date', 'MIN']], on=['player', 'game_date'], how='left')
-df = df[(df.game_date==max_date) | ~(df.MIN.isnull())].drop('MIN', axis=1)
-print(df.shape)
-
-# roll the box score stats and shift back a game
-box_score_roll = box_score_rolling(box_score)
-df = pd.merge(df, box_score_roll, on=['player', 'game_date'])
-print(df.shape)
+df = remove_no_minutes(df, box_score)
+df = add_last_game_box_score(df, box_score)
+df = box_score_rolling(df, box_score)
+df = remove_low_minutes(df, box_score)
 
 df = available_stats(df, missing)
 print('available stats:', df.shape)
 
-# add the rolling advanced stats and tracking stats
-df = add_advanced_stats(df)
+df, adv_stats = add_advanced_stats(df)
+df = add_last_game_advanced_stats(df, adv_stats)
+
 df = add_tracking_stats(df)
 print(df.shape)
 
@@ -652,9 +707,10 @@ print(df.shape)
 
 #%%
 
-dm.write_to_db(df.iloc[:,:2000], 'Model_Features', 'Model_Data', if_exist='replace')
+train_date = train_date.replace('-', '')
+dm.write_to_db(df.iloc[:,:2000], 'Model_Features', f'Model_Data_{train_date}', if_exist='replace')
 if df.shape[1] > 2000:
-    dm.write_to_db(df.iloc[:,2000:], 'Model_Features', 'Model_Data2', if_exist='replace')
+    dm.write_to_db(df.iloc[:,2000:], 'Model_Features', f'Model_Data_{train_date}v2', if_exist='replace')
 
 # %%
 # for t in ['Box_Score', 'Advanced_Stats', 'Tracking_Data']:
@@ -667,5 +723,29 @@ if df.shape[1] > 2000:
 
 # %%
 
-cur_cols = df.columns
+def team_proj(df):
+    team_stats = df.sort_values(by=['team', 'game_date', 'fd_points'],
+                            ascending=[True, True, False]).copy().reset_index(drop=True)
+    team_stats = team_stats[team_stats.fd_points > 0].reset_index(drop=True)
+
+    team_stats['team_rank'] = team_stats.groupby(['team', 'game_date']).cumcount()
+    team_stats = team_stats[team_stats.team_rank <= 9].reset_index(drop=True)
+
+    obj_cols = team_stats.dtypes[team_stats.dtypes == object].index.tolist()
+    agg_cols = {c: 'mean' if 'pct' in c else 'sum' for c in team_stats if c not in obj_cols}
+    agg_cols
+    team_stats = team_stats.groupby(['team', 'opponent', 'game_date']).agg(agg_cols).reset_index()
+
+    return team_stats
+
+team_df = team_proj(df)
+team_df = add_team_box_score(team_df, 'team')
+team_df = add_team_box_score(team_df, 'opponent')
+team_df = add_team_advanced_stats(team_df, 'team')
+team_df = add_team_advanced_stats(team_df, 'opponent')
+team_df = add_team_tracking(team_df, 'team')
+team_df = add_team_tracking(team_df, 'opponent')
+team_df = add_dk_team_lines(team_df)
+
+team_df
 # %%

@@ -39,12 +39,13 @@ dm = DataManage(db_path)
 run_params = {
     
     # set year and week to analyze
-    'cv_time_input': '2023-02-08',
-    'train_time_split': '2023-03-17',
+    'cv_time_input': '2023-02-17',
+    'train_time_split': '2023-03-21',
     'metrics': [
-               'points_assists', 'points_rebounds',  'three_pointers', 'points_rebounds_assists',
-                'points', 'assists', 'rebounds',  
-                #'steals', 'blocks','steals_blocks'
+            #    'points', 'assists', 'rebounds', 'three_pointers',
+                'assists_rebounds', 'steals', 'blocks', 'steals_blocks',
+                'points_assists', 'points_rebounds', 'points_rebounds_assists',
+            #   
                 ],
     'n_iters': 25,
     'n_splits': 5
@@ -140,7 +141,7 @@ def create_metric_split_columns(df, metric_split):
 
 def create_y_act(df, metric):
 
-    if metric in ('points_assists', 'points_rebounds', 'points_rebounds_assists', 'steals_blocks'):
+    if metric in ('points_assists', 'points_rebounds', 'points_rebounds_assists', 'steals_blocks', 'assists_rebounds'):
         metric_split = metric.split('_')
         df[f'y_act_{metric}'] = df[['y_act_' + c for c in metric_split]].sum(axis=1)
         df = create_metric_split_columns(df, metric_split)
@@ -152,7 +153,7 @@ def create_y_act(df, metric):
 
 def pull_odds(metric):
 
-    odds = dm.read(f'''SELECT player, game_date year, value
+    odds = dm.read(f'''SELECT player, game_date year, value, decimal_odds
                        FROM Draftkings_Odds 
                        WHERE stat_type='{metric}'
                              AND over_under='over'
@@ -400,44 +401,63 @@ for metric in run_params['metrics']:
 
 #%%
 
-# cur_df = df_train_class.copy()
-# model_obj = 'class'
-# model_name = 'test_class'
-# alpha=None
-# i=50
+metric = 'rebounds'
 
-# skm, X, y = get_skm(cur_df, model_obj, to_drop=run_params['drop_cols'])
-# pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples)
+# load data and filter down
+pkey, model_output_path = create_pkey_output_path(metric, run_params, vers)
+df, run_params = load_data(run_params)
+df = remove_low_counts(df)
+df = create_y_act(df, metric)
 
-# if model_obj == 'class': proba = True
-# else: proba = False
+df['week'] = 1
+df['year'] = df.game_date
+df['team'] = 0
 
-# # fit and append the ADP model
-# import time
-# start = time.time()
-# best_models, oof_data, _ = skm.time_series_cv(pipe, X, y, params, n_iter=run_params['n_iters'], 
-#                                                 n_splits=run_params['n_splits'], col_split='game_date', 
-#                                                 bayes_rand='custom_rand', time_split=run_params['cv_time_input'],
-#                                                 proba=proba, random_seed=(i+7)*19+(i*12)+6, alpha=alpha)
-# # %%
+df_train, df_predict, output_start, min_samples = train_predict_split(df, run_params)
+df_train['y_act'] = df_train.y_act + (np.random.random(size=len(df_train)) / 1000)
+df_train_class, df_predict_class = get_over_under_class(df, metric, run_params, model_obj='class')
+df_train_diff, df_predict_diff = get_over_under_class(df, metric, run_params, model_obj='reg')
 
-# pipeline = best_models[0]
-# pipeline.fit(X,y)
+# set up blank dictionaries for all metrics
+out_reg, out_quant, out_class, out_diff = output_dict(),  output_dict(), output_dict(), output_dict()
 
-# # get the feature names from the original dataset
-# feature_names = X.columns
+cur_df = df_train_class.copy()
+model_obj = 'class'
+model_name = 'test_class'
+alpha=None
+i=50
 
-# # get the indices of the selected features
-# selected_features = pipeline.named_steps['k_best_c'].get_support()
+skm, X, y = get_skm(cur_df, model_obj, to_drop=run_params['drop_cols'])
+pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples)
 
-# # filter the feature names to get only the selected features
-# selected_feature_names = feature_names[selected_features]
+if model_obj == 'class': proba = True
+else: proba = False
 
-# # get the sorted indices of the coefficients
-# coef_indices = np.argsort(np.abs(pipeline.named_steps['lr_c'].coef_[0]))[::-1]
+# fit and append the ADP model
+import time
+start = time.time()
+best_models, oof_data, _ = skm.time_series_cv(pipe, X, y, params, n_iter=run_params['n_iters'], 
+                                                n_splits=run_params['n_splits'], col_split='game_date', 
+                                                bayes_rand='custom_rand', time_split=run_params['cv_time_input'],
+                                                proba=proba, random_seed=(i+7)*19+(i*12)+6, alpha=alpha)
 
-# # print the feature names and corresponding coefficients in order
-# for feature, coef in zip(selected_feature_names[coef_indices], pipeline.named_steps['lr_c'].coef_[0][coef_indices]):
-#     print(f'{feature}: {coef:.4f}')
+pipeline = best_models[0]
+pipeline.fit(X,y)
+
+# get the feature names from the original dataset
+feature_names = X.columns
+
+# get the indices of the selected features
+selected_features = pipeline.named_steps['k_best_c'].get_support()
+
+# filter the feature names to get only the selected features
+selected_feature_names = feature_names[selected_features]
+
+# get the sorted indices of the coefficients
+coef_indices = np.argsort(np.abs(pipeline.named_steps['lr_c'].coef_[0]))[::-1]
+
+# print the feature names and corresponding coefficients in order
+for feature, coef in zip(selected_feature_names[coef_indices], pipeline.named_steps['lr_c'].coef_[0][coef_indices]):
+    print(f'{feature}: {coef:.4f}')
 
 # %%

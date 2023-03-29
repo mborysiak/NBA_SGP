@@ -593,10 +593,9 @@ def remove_low_corrs(df, threshold):
                             columns=[c for c in df.columns if c not in obj_cols],
                             index=[c for c in df.columns if c not in obj_cols])
     
-    corrs = corrs[[y for y in corrs.columns if 'y_act' in y]]# and 'steals' not in y and 'blocks' not in y]]
+    corrs = corrs[[y for y in corrs.columns if 'y_act' in y]]
     corrs = corrs[~corrs.index.str.contains('y_act')]
     good_corrs = list(corrs[abs(corrs) >= threshold].dropna(how='all').index)
-
 
     obj_cols.extend(good_corrs)
     obj_cols.extend(corrs.columns)
@@ -644,6 +643,17 @@ def add_dk_team_lines(df):
 
     lines = add_rolling_stats(lines, ['team'], ['moneyline_odds', 'over', 'implied_points_for', 'implied_points_against'])
     df = pd.merge(df, lines, on=['team', 'game_date'])
+    return df
+
+
+def get_columns(df, train_date, threshold=0.05):
+    try:
+        cols = dm.read(f"SELECT * FROM Model_Data_{train_date}", 'Model_Features').columns.tolist()
+        cols.extend(dm.read(f"SELECT * FROM Model_Data_{train_date}v2", 'Model_Features').columns.tolist())
+        df = df[cols]
+    except:
+        df = remove_low_corrs(df, threshold=threshold)
+
     return df
 
 #%%
@@ -701,25 +711,16 @@ df = add_y_act(df, box_score)
 df = df.dropna(axis=0, subset=[c for c in df.columns if 'y_act' not in c]).reset_index(drop=True)
 print(df.shape)
 
-df = remove_low_corrs(df, threshold=0.05)
+train_date = train_date.replace('-', '')
+df = get_columns(df, train_date, threshold=0.05)
 print(df.game_date.max())
 print(df.shape)
 
 #%%
 
-train_date = train_date.replace('-', '')
 dm.write_to_db(df.iloc[:,:2000], 'Model_Features', f'Model_Data_{train_date}', if_exist='replace')
 if df.shape[1] > 2000:
     dm.write_to_db(df.iloc[:,2000:], 'Model_Features', f'Model_Data_{train_date}v2', if_exist='replace')
-
-# %%
-# for t in ['Box_Score', 'Advanced_Stats', 'Tracking_Data']:
-#     df = dm.read(f"SELECT * FROM {t}", 'Player_Stats')
-#     df.loc[df.TEAM_ABBREVIATION=='NYK', 'TEAM_ABBREVIATION'] = 'NY'
-#     df.loc[df.TEAM_ABBREVIATION=='SAS', 'TEAM_ABBREVIATION'] = 'SA'
-#     dm.write_to_db(df, 'Player_Stats', t, 'replace', True)
-
-#%%
 
 # %%
 
@@ -738,6 +739,65 @@ def team_proj(df):
 
     return team_stats
 
+def team_rolling_proj_stats(team_df):
+    opp_df = team_df.copy()
+    opp_df.columns = ['opp_' + c if c not in ['team', 'opponent', 'game_date'] else c for c in opp_df.columns]
+
+    team_df = rolling_proj_stats(team_df.rename(columns={'team': 'player'}))
+    opp_df = rolling_proj_stats(opp_df.rename(columns={'team': 'player'}))
+
+    team_df = team_df.rename(columns={'player': 'team'})
+    opp_df = opp_df.drop('opponent', axis=1).rename(columns={'player': 'opponent'})
+    team_df = pd.merge(team_df, opp_df, on=['opponent', 'game_date'])
+    return team_df
+
+
+def add_team_y_act(team_df):
+
+    team_bs = dm.read("SELECT * FROM Box_Score", 'Team_Stats')
+    team_bs = team_bs[['TEAM_ABBREVIATION', 'game_date', 'PTS']]
+    team_bs.columns = ['team', 'game_date', 'y_act_team_pts']
+
+    team_df = pd.merge(team_df, team_bs, on=['team', 'game_date'])
+
+    team_bs.columns = ['opponent', 'game_date', 'y_act_opponent_pts']
+    team_df = pd.merge(team_df, team_bs, on=['opponent', 'game_date'])
+        
+    team_df['y_act_total_points'] = team_df.y_act_team_pts + team_df.y_act_opponent_pts
+    team_df['y_act_spread'] =  team_df.y_act_opponent_pts - team_df.y_act_team_pts
+
+    team_df['y_act_over_total_points'] = np.where(team_df.y_act_total_points > team_df.over, 1, 0)
+    team_df['y_act_over_spread'] = np.where( team_df.spread > team_df.y_act_spread, 1, 0)
+
+
+    return team_df
+
+
+df = fantasy_data()
+df = fantasy_pros(df)
+df = numberfire(df)
+df = fix_fp_returns(df)
+
+missing = df.loc[(df.fd_points==0) | ((df.fp_points==0) & (df.nf_points==0)), 
+                 ['player', 'game_date']].copy().reset_index(drop=True)
+
+df = consensus_fill(df)
+df = forward_fill(df)
+df = df.dropna().reset_index(drop=True)
+
+df = df[(df.fd_points>0) & (df.fp_points>0) & (df.nf_points>0)].reset_index(drop=True)
+df = add_proj_market_share(df)
+
+# get box score stats androll the box score stats and shift back a game
+box_score = get_box_score()
+df = remove_no_minutes(df, box_score)
+df = add_last_game_box_score(df, box_score)
+df = box_score_rolling(df, box_score)
+df = remove_low_minutes(df, box_score)
+
+df = available_stats(df, missing)
+print('available stats:', df.shape)
+
 team_df = team_proj(df)
 team_df = add_team_box_score(team_df, 'team')
 team_df = add_team_box_score(team_df, 'opponent')
@@ -747,5 +807,17 @@ team_df = add_team_tracking(team_df, 'team')
 team_df = add_team_tracking(team_df, 'opponent')
 team_df = add_dk_team_lines(team_df)
 
-team_df
+team_df = add_team_y_act(team_df)
+team_df = remove_low_corrs(team_df, threshold=0.05)
+
+
+dm.write_to_db(team_df.iloc[:,:2000], 'Model_Features', f'Team_Model_Data_{train_date}', if_exist='replace')
+if df.shape[1] > 2000:
+    dm.write_to_db(team_df.iloc[:,2000:], 'Model_Features', f'Team_Model_Data_{train_date}v2', if_exist='replace')
+# %%
+
+team_df[['team', 'opponent', 'game_date', 'y_act_team_pts', 'y_act_opponent_pts', 'y_act_spread', 'spread', 'y_act_over_spread']]
+# %%
+
+
 # %%

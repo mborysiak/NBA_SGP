@@ -448,7 +448,7 @@ nba_stats = NBAStats()
 
 #%%
 import time
-yesterday_date = dt.datetime(2023, 3, 21).date()
+yesterday_date = dt.datetime(2023, 3, 28).date()
 
 box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score', yesterday_date)
 time.sleep(5)
@@ -468,7 +468,6 @@ for df, tname in zip(dfs, tnames):
     dm.delete_from_db('Team_Stats', tname, f"game_date='{yesterday_date}'")
     dm.write_to_db(df, 'Team_Stats', tname, 'append')
 
-# %%
 # %%
 
 df = dm.read("SELECT * FROM Draftkings_Odds", 'Player_Stats')

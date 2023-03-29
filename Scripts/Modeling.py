@@ -39,13 +39,13 @@ dm = DataManage(db_path)
 run_params = {
     
     # set year and week to analyze
-    'cv_time_input': '2023-02-17',
-    'train_time_split': '2023-03-21',
+    'cv_time_input': '2023-02-20',
+    'train_time_split': '2023-03-28',
     'metrics': [
-            #    'points', 'assists', 'rebounds', 'three_pointers',
-                'assists_rebounds', 'steals', 'blocks', 'steals_blocks',
-                'points_assists', 'points_rebounds', 'points_rebounds_assists',
-            #   
+                'points', 'assists', 'rebounds', 'three_pointers',   
+                'steals', 'steals_blocks', 'blocks', 
+                'total_points', 'spread'
+             #   'points_assists', 'points_rebounds', 'points_rebounds_assists', 'assists_rebounds'  
                 ],
     'n_iters': 25,
     'n_splits': 5
@@ -80,10 +80,10 @@ def create_pkey_output_path(metric, run_params, vers):
 def load_data(run_params):
 
     # load data and filter down
-    df = dm.read(f'''SELECT * FROM Model_Data''', 'Model_Features')
+    df = dm.read(f'''SELECT * FROM Model_Data_{run_params['train_time_split']}''', 'Model_Features')
    
     if df.shape[1]==2000:
-        df2 = dm.read(f'''SELECT * FROM Model_Data2''', 'Model_Features')
+        df2 = dm.read(f'''SELECT * FROM Model_Data_{run_params['train_time_split']}v2''', 'Model_Features')
         df = pd.concat([df, df2], axis=1)
 
     df.game_date = df.game_date.apply(lambda x: int(x.replace('-', '')))
@@ -150,10 +150,35 @@ def create_y_act(df, metric):
     df = df.rename(columns={f'y_act_{metric}': 'y_act'})
     return df
 
+def parlay_values(df):
+    df['value'] = np.select([
+                                df.value <= 3, 
+                                (df.value > 3) & (df.value < 10),
+                                (df.value >= 10) & (df.value < 24),
+                                (df.value >= 24) & (df.value < 30),
+                                (df.value >= 30) & (df.value < 35),
+                                (df.value >= 35) & (df.value < 40),
+                                (df.value >= 40) & (df.value < 45),
+                                (df.value >= 45)
+                            ], 
+                            
+                            [
+                                df.value,
+                                df.value - 1,
+                                df.value - 2,
+                                df.value - 3,
+                                30,
+                                35,
+                                40,
+                                df.value - 5
+                            ]
+                            )
+    
+    return df
 
-def pull_odds(metric):
+def pull_odds(metric, run_params):
 
-    odds = dm.read(f'''SELECT player, game_date year, value, decimal_odds
+    odds = dm.read(f'''SELECT player, game_date year, value
                        FROM Draftkings_Odds 
                        WHERE stat_type='{metric}'
                              AND over_under='over'
@@ -161,6 +186,7 @@ def pull_odds(metric):
                              AND decimal_odds > 1.5
                     ''', 'Player_Stats')
     odds.year = odds.year.apply(lambda x: int(x.replace('-', '')))
+    if run_params['parlay']: odds = parlay_values(odds)
 
     return odds
 
@@ -181,7 +207,7 @@ def remove_low_counts(df):
 
 def get_over_under_class(df, metric, run_params, model_obj='class'):
     
-    odds = pull_odds(metric)
+    odds = pull_odds(metric, run_params)
     df = pd.merge(df, odds, on=['player', 'year'])
     df = df.sort_values(by='game_date').reset_index(drop=True)
 
@@ -364,11 +390,17 @@ for metric in run_params['metrics']:
 
     df_train, df_predict, output_start, min_samples = train_predict_split(df, run_params)
     df_train['y_act'] = df_train.y_act + (np.random.random(size=len(df_train)) / 1000)
+
+    run_params['parlay'] = False
     df_train_class, df_predict_class = get_over_under_class(df, metric, run_params, model_obj='class')
     df_train_diff, df_predict_diff = get_over_under_class(df, metric, run_params, model_obj='reg')
 
+    run_params['parlay'] = True
+    df_train_parlay, df_predict_parlay = get_over_under_class(df, metric, run_params, model_obj='class')
+    # df_train_diff, df_predict_diff = get_over_under_class(df, metric, run_params, model_obj='reg')
+
     # set up blank dictionaries for all metrics
-    out_reg, out_quant, out_class, out_diff = output_dict(),  output_dict(), output_dict(), output_dict()
+    out_reg, out_quant, out_class, out_parlay, out_diff = output_dict(), output_dict(),  output_dict(), output_dict(), output_dict()
 
     #=========
     # Run Models
@@ -378,6 +410,11 @@ for metric in run_params['metrics']:
     for i, m in enumerate(model_list):
         out_class, _, _= get_model_output(m, df_train_class, 'class', out_class, run_params, i, min_samples)
     save_output_dict(out_class, model_output_path, 'class')
+
+    model_list = ['lr_c', 'xgb_c',  'lgbm_c', 'gbm_c', 'rf_c', 'knn_c', 'gbmh_c'] 
+    for i, m in enumerate(model_list):
+        out_parlay, _, _= get_model_output(m, df_train_parlay, 'class', out_parlay, run_params, i, min_samples)
+    save_output_dict(out_parlay, model_output_path, 'parlay_class')
 
     # run all models
     model_list = [ 'bridge', 'huber', 'lgbm', 'ridge', 'svr', 'lasso', 'enet', 'xgb', 'knn', 'gbm', 'gbmh', 'rf']
@@ -401,7 +438,7 @@ for metric in run_params['metrics']:
 
 #%%
 
-metric = 'rebounds'
+metric = 'steals'
 
 # load data and filter down
 pkey, model_output_path = create_pkey_output_path(metric, run_params, vers)

@@ -6,7 +6,7 @@ WITH base_query AS (
 				AVG(pred_q50) pred_q50,
 				AVG(pred_q75) pred_q75
 		FROM Over_Probability
-		WHERE game_date = 20230328
+		WHERE game_date = 20230329
 				AND train_date = 20230321
 				AND ens_vers = 'mae1_rsq1_fullstack_allstats_diff_grp_no_odds'
 				AND parlay=0
@@ -41,7 +41,7 @@ WITH base_query AS (
 				AVG(pred_q50) pred_q50,
 				AVG(pred_q75) pred_q75
 		FROM Over_Probability
-		WHERE game_date = 20230328
+		WHERE game_date = 20230329
 				AND train_date = 20230321
 				AND ens_vers = 'mae1_rsq1_fullstack_allstats_diff_grp_no_odds'
 				AND parlay=1
@@ -68,11 +68,11 @@ WITH base_query AS (
 				AVG(pred_q50) pred_q50,
 				AVG(pred_q75) pred_q75
 		FROM Over_Probability
-		WHERE game_date = 20230328
+		WHERE game_date = 20230329
 				AND train_date = 20230321
 				AND ens_vers = 'mae1_rsq1_fullstack_allstats_diff_grp_no_odds'
 				AND parlay=1
-				AND team in ('GS', 'NO')
+				AND team in ('CHI', 'LAL')
 				AND metric IN ('points', 'rebounds', 'assists', 'three_pointers', 'steals', 'blocks')
 		GROUP BY player, metric, game_date, team, opponent, decimal_odds, value
 )

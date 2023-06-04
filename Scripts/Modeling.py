@@ -43,8 +43,8 @@ run_params = {
     'train_time_split': '2023-03-28',
     'metrics': [
                 'points', 'assists', 'rebounds', 'three_pointers',   
-                'steals', 'steals_blocks', 'blocks', 
-                'total_points', 'spread'
+                'steals_blocks', 'blocks', 'steals', 
+             #   'total_points', 'spread'
              #   'points_assists', 'points_rebounds', 'points_rebounds_assists', 'assists_rebounds'  
                 ],
     'n_iters': 25,
@@ -55,15 +55,15 @@ run_params['cv_time_input'] = int(run_params['cv_time_input'].replace('-', ''))
 run_params['train_time_split'] = int(run_params['train_time_split'].replace('-', ''))
 
 # set weights for running model
-r2_wt = 1
-mae_wt = 1
+r2_wt = 0
+mae_wt = 0
 sera_wt = 0
-mse_wt = 0
+mse_wt = 1
 matt_wt = 0
 brier_wt = 1
 
 # set version and iterations
-vers = 'mae1_rsq1_lowsample_perc'
+vers = 'mse1_lowsample_perc'
 
 #----------------
 # Data Loading
@@ -406,15 +406,15 @@ for metric in run_params['metrics']:
     # Run Models
     #=========
     
-    model_list = ['lr_c', 'xgb_c',  'lgbm_c', 'gbm_c', 'rf_c', 'knn_c', 'gbmh_c'] 
-    for i, m in enumerate(model_list):
-        out_class, _, _= get_model_output(m, df_train_class, 'class', out_class, run_params, i, min_samples)
-    save_output_dict(out_class, model_output_path, 'class')
+    # model_list = ['lr_c', 'xgb_c',  'lgbm_c', 'gbm_c', 'rf_c', 'knn_c', 'gbmh_c'] 
+    # for i, m in enumerate(model_list):
+    #     out_class, _, _= get_model_output(m, df_train_class, 'class', out_class, run_params, i, min_samples)
+    # save_output_dict(out_class, model_output_path, 'class')
 
-    model_list = ['lr_c', 'xgb_c',  'lgbm_c', 'gbm_c', 'rf_c', 'knn_c', 'gbmh_c'] 
-    for i, m in enumerate(model_list):
-        out_parlay, _, _= get_model_output(m, df_train_parlay, 'class', out_parlay, run_params, i, min_samples)
-    save_output_dict(out_parlay, model_output_path, 'parlay_class')
+    # model_list = ['lr_c', 'xgb_c',  'lgbm_c', 'gbm_c', 'rf_c', 'knn_c', 'gbmh_c'] 
+    # for i, m in enumerate(model_list):
+    #     out_parlay, _, _= get_model_output(m, df_train_parlay, 'class', out_parlay, run_params, i, min_samples)
+    # save_output_dict(out_parlay, model_output_path, 'parlay_class')
 
     # run all models
     model_list = [ 'bridge', 'huber', 'lgbm', 'ridge', 'svr', 'lasso', 'enet', 'xgb', 'knn', 'gbm', 'gbmh', 'rf']
@@ -428,13 +428,13 @@ for metric in run_params['metrics']:
         out_reg, _, _ = get_model_output(m, df_train_diff, 'reg', out_reg, run_params, i, min_samples)
     save_output_dict(out_reg, model_output_path, 'diff')
 
-    # run all other models
-    model_list = ['gbm_q', 'lgbm_q', 'qr_q', 'knn_q', 'rf_q']
-    for i, m in enumerate(model_list):
-        for alph in [0.1, 0.25, 0.75, 0.9]:
-            print('\n', 'Quantile:', alph, '\n-----------')
-            out_quant, _, _ = get_model_output(m, df_train, 'quantile', out_quant, run_params, i, alpha=alph)
-    save_output_dict(out_quant, model_output_path, 'quant')
+    # # run all other models
+    # model_list = ['gbm_q', 'lgbm_q', 'qr_q', 'knn_q', 'rf_q']
+    # for i, m in enumerate(model_list):
+    #     for alph in [0.1, 0.25, 0.75, 0.9]:
+    #         print('\n', 'Quantile:', alph, '\n-----------')
+    #         out_quant, _, _ = get_model_output(m, df_train, 'quantile', out_quant, run_params, i, alpha=alph)
+    # save_output_dict(out_quant, model_output_path, 'quant')
 
 #%%
 

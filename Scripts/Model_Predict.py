@@ -123,7 +123,7 @@ def get_full_pipe(skm, m, alpha=None, stack_model=False, std_model=False, min_sa
         else: kb = 'k_best'
 
         pipe = skm.model_pipe([
-                            skm.piece('random_sample'),
+                        #    skm.piece('random_sample'),
                             skm.piece('std_scale'), 
                             skm.piece(kb),
                             skm.piece(m)
@@ -179,8 +179,8 @@ def get_full_pipe(skm, m, alpha=None, stack_model=False, std_model=False, min_sa
         params[f'{kb}__k'] = range(1, 40)
     
     elif stack_model:
-        params['random_sample__frac'] = np.arange(0.3, 1, 0.05)
-        params[f'{kb}__k'] = range(1, 30)
+       # params['random_sample__frac'] = np.arange(0.3, 1, 0.05)
+        params[f'{kb}__k'] = range(1, 50)
 
     return pipe, params
 
@@ -240,7 +240,7 @@ def load_all_stack_pred(model_output_path, prefix=''):
 
 def run_stack_models(final_m, i, X_stack, y_stack, best_models, scores, 
                      stack_val_pred, model_obj='reg', grp = None, alpha = None, show_plots=True,
-                     num_k_folds=3, print_coef=True, proba=False):
+                     num_k_folds=3, print_coef=True, proba=False, wt_col=None, run_adp=False):
 
     print(f'\n{final_m}')
 
@@ -253,12 +253,11 @@ def run_stack_models(final_m, i, X_stack, y_stack, best_models, scores,
     if 'gbmh' in final_m or 'knn' in final_m: print_coef = False
     else: print_coef = print_coef
 
-    best_model, stack_scores, stack_pred = skm.best_stack(pipe, params,
-                                                          X_stack, y_stack, n_iter=run_params['n_iters'], 
-                                                          run_adp=False, print_coef=print_coef,
-                                                          sample_weight=False, proba=proba,
-                                                          num_k_folds=num_k_folds, alpha=alpha,
-                                                          random_state=(i*12)+(i*17), grp=grp)
+    best_model, stack_scores, stack_pred = skm.best_stack(pipe, params, X_stack, y_stack, 
+                                                          n_iter=run_params['n_iters'], 
+                                                          run_adp=run_adp, print_coef=print_coef,
+                                                          proba=proba,num_k_folds=num_k_folds, alpha=alpha,
+                                                          random_state=(i*12)+(i*17), grp=grp, wt_col=wt_col)
 
     best_models.append(best_model)
     scores.append(stack_scores['stack_score'])
@@ -326,7 +325,7 @@ def stack_predictions(X_predict, best_models, final_models, model_obj='reg'):
     return predictions
 
 
-def best_average_models(scores, final_models, y_stack, stack_val_pred, predictions, model_obj, min_include = 3):
+def best_average_models(scores, final_models, y_stack, stack_val_pred, predictions, model_obj, min_include = 3, wts=None):
     
     skm, _, _ = get_skm(df_train, model_obj=model_obj, to_drop=[])
     
@@ -337,7 +336,7 @@ def best_average_models(scores, final_models, y_stack, stack_val_pred, predictio
         models_included.append(top_n)
         model_idx = np.array(final_models)[top_n]
         
-        n_score = skm.custom_score(y_stack, stack_val_pred[model_idx].mean(axis=1))
+        n_score = skm.custom_score(y_stack, stack_val_pred[model_idx].mean(axis=1), sample_weight=wts)
         n_scores.append(n_score)
         
     print('All Average Scores:', np.round(n_scores, 3))
@@ -354,10 +353,10 @@ def best_average_models(scores, final_models, y_stack, stack_val_pred, predictio
     return best_val, best_predictions, best_score
 
 
-def average_stack_models(scores, final_models, y_stack, stack_val_pred, predictions, model_obj, show_plot=True, min_include=3):
+def average_stack_models(scores, final_models, y_stack, stack_val_pred, predictions, model_obj, show_plot=True, min_include=3, wts=None):
     
     best_val, best_predictions, best_score = best_average_models(scores, final_models, y_stack, stack_val_pred, predictions, 
-                                                                 model_obj=model_obj, min_include=min_include)
+                                                                 model_obj=model_obj, min_include=min_include, wts=wts)
     
     if show_plot:
         show_scatter_plot(best_val.mean(axis=1), y_stack, r2=True)
@@ -620,7 +619,7 @@ def load_stack_runs(model_output_path, fname):
     return stack_in['best_models'], stack_in['scores'], stack_in['stack_val_pred']
 
 
-def load_run_models(run_params, final_models, X_stack, y_stack, X_predict, model_obj, alpha=None, grp=None):
+def load_run_models(run_params, final_models, X_stack, y_stack, X_predict, model_obj, alpha=None, grp=None, run_adp=False, wt_col=None):
      
     model_output_path = run_params['model_output_path']
     ens_vers = run_params['ensemble_vers']
@@ -643,7 +642,8 @@ def load_run_models(run_params, final_models, X_stack, y_stack, X_predict, model
                 best_models, scores, stack_val_pred = run_stack_models(fm, i+1, X_stack, y_stack, best_models, 
                                                                         scores, stack_val_pred, model_obj=model_obj_actual,
                                                                         grp=grp, alpha=alpha, show_plots=show_plot, 
-                                                                        num_k_folds=num_k_folds, print_coef=print_coef)
+                                                                        num_k_folds=num_k_folds, print_coef=print_coef,
+                                                                        run_adp=run_adp, wt_col=wt_col)
             except:
                 print('Error in model run', fm)
                 final_models.remove(fm)
@@ -652,9 +652,12 @@ def load_run_models(run_params, final_models, X_stack, y_stack, X_predict, model
         
     final_models = [f for f in final_models if f in stack_val_pred.columns]
     predictions = stack_predictions(X_predict, best_models, final_models, model_obj=model_obj_actual)
+    
+    if wt_col is not None: wts = X_stack[wt_col].values
+    else: wts = None
     best_val, best_predictions, _ = average_stack_models(scores, final_models, y_stack, stack_val_pred, 
                                                             predictions, model_obj=model_obj_actual, show_plot=show_plot, 
-                                                            min_include=min_include)
+                                                            min_include=min_include, wts=wts)
 
     return best_val, best_predictions
 
@@ -687,22 +690,22 @@ run_params = {
     
     # set year and week to analyze
     'cv_time_input_orig': '2023-02-06',
-    'train_date_orig': '2023-03-21',
-    'test_time_split_orig': '2023-03-27',
+    'train_date_orig': '2023-03-28',
+    'test_time_split_orig': '2023-04-07',
     'metrics':  [
-                'points', 'assists', 'rebounds', 'three_pointers',   
-                'steals', 'steals_blocks', 'blocks',# 'assists_rebounds',
-                #'points_assists', 'points_rebounds', 'points_rebounds_assists', 
+                'points', 'assists', 'rebounds', 'three_pointers', 'steals_blocks', #'blocks','steals',
+               # 'assists_rebounds', 'points_assists', 'points_rebounds', 'points_rebounds_assists', 
                 ],
 
     'n_iters': 25,
     'n_splits': 5,
 
     # set version and iterations
-    # 'pred_vers': 'mse5_rsq1_lowsample_perc',
-    'pred_vers': 'mae1_rsq1_lowsample_perc',
-    'ensemble_vers': 'mae1_rsq1_fullstack_allstats_diff_grp_no_odds',
-    'parlay': True,
+    'pred_vers': 'mse1_lowsample_perc',
+    # 'pred_vers': 'mae1_rsq1_lowsample_perc',
+    # 'ensemble_vers': 'mae1_rsq1_fullstack_allstats_diff_grp_no_odds',
+    'ensemble_vers': 'mae1_rsq1_grp_basic_yes_odds_2weighted',
+    'parlay': False,
     'std_dev_type': 'pred_quant_spline'
 
 }
@@ -712,11 +715,11 @@ run_params['train_date'] = int(run_params['train_date_orig'].replace('-', ''))
 run_params['test_time_split'] = int(run_params['test_time_split_orig'].replace('-', ''))
 
 
-full_stack_features = True
+full_stack_features = False
 
 min_include = 2
 show_plot= True
-print_coef = False
+print_coef = True
 num_k_folds = 3
 
 # set weights for running model
@@ -733,26 +736,22 @@ teams.year = teams.year.apply(lambda x: int(x.replace('-', '')))
 
 # %%
 
-for te_date, tr_date, ens_vers, parl in [
-                           ['2023-03-29', '2023-03-21', 'mae1_rsq1_fullstack_allstats_diff_grp_no_odds', False],
-                           ['2023-03-29', '2023-03-21', 'mae1_rsq1_fullstack_allstats_diff_grp_no_odds', True],
-                        #    ['2023-03-21', 'mae1_rsq1_fullstack_allstats_diff_grp', False],
-                            # ['2023-03-17', 'mae1_rsq1_fullstack_allstats_diff_grp_no_odds', False],
-                            # ['2023-03-17', 'mae1_rsq1_fullstack_allstats_diff_grp', False]
-
-                        # ['2023-03-21', '2023-03-21', 'mae1_rsq1_fullstack_allstats_diff_grp_no_odds', True],
-                        # ['2023-03-22', '2023-03-21', 'mae1_rsq1_fullstack_allstats_diff_grp_no_odds', True],
-                        # ['2023-03-23', '2023-03-21', 'mae1_rsq1_fullstack_allstats_diff_grp_no_odds', True],
-                        # ['2023-03-24', '2023-03-21', 'mae1_rsq1_fullstack_allstats_diff_grp_no_odds', True],
-                        # ['2023-03-25', '2023-03-21', 'mae1_rsq1_fullstack_allstats_diff_grp_no_odds', True],
-                        # ['2023-03-26', '2023-03-21', 'mae1_rsq1_fullstack_allstats_diff_grp_no_odds', True],
-
+for te_date, tr_date, ens_vers in [
+                            ['2023-04-07', '2023-03-28', 'mae1_rsq1_grp_basic_yes_odds_2weighted'],
+                            ['2023-04-06', '2023-03-28', 'mae1_rsq1_grp_basic_yes_odds_2weighted'],
+                            ['2023-04-05', '2023-03-28', 'mae1_rsq1_grp_basic_yes_odds_2weighted'],
+                            ['2023-04-04', '2023-03-28', 'mae1_rsq1_grp_basic_yes_odds_2weighted'],
+                            ['2023-04-02', '2023-03-28', 'mae1_rsq1_grp_basic_yes_odds_2weighted'],
+                            ['2023-04-01', '2023-03-28', 'mae1_rsq1_grp_basic_yes_odds_2weighted'],
+                            ['2023-03-31', '2023-03-28', 'mae1_rsq1_grp_basic_yes_odds_2weighted'],
+                            ['2023-03-30', '2023-03-28', 'mae1_rsq1_grp_basic_yes_odds_2weighted'],
+                            ['2023-03-29', '2023-03-28', 'mae1_rsq1_grp_basic_yes_odds_2weighted'],
+                            ['2023-03-28', '2023-03-28', 'mae1_rsq1_grp_basic_yes_odds_2weighted'],
                           ]:
     
     run_params['train_date'] = int(tr_date.replace('-', ''))
     run_params['test_time_split'] = int(te_date.replace('-', ''))
     run_params['ensemble_vers'] = ens_vers
-    run_params['parlay'] = parl
 
     for metric in run_params['metrics']:
 
@@ -808,53 +807,65 @@ for te_date, tr_date, ens_vers, parl in [
         if run_params['parlay']: pickle_name = 'parlay_class'
         else: pickle_name = 'class'
 
-        df_predict_prob, X_stack_prob, y_stack_prob, X_predict_prob = X_y_stack_class(df, metric, run_params, pickle_name)
-        X_stack_prob, y_stack_prob = join_train_features(X_stack_player, X_stack_prob, y_stack_prob)
-        X_predict_prob = join_predict_features(df_predict, X_predict, X_predict_prob)
-        X_stack_prob = create_value_compare_col(X_stack_prob)
-        X_predict_prob = create_value_compare_col(X_predict_prob)
+        for pickle_name, parl in zip(['class', 'parlay_class'], [False, True]):
+            
+            run_params['parlay'] = parl
 
-        if 'no_odds' in run_params['ensemble_vers']:
-            X_stack_prob = X_stack_prob.drop('decimal_odds', axis=1)
-            X_predict_prob = X_predict_prob.drop('decimal_odds', axis=1)
+            df_predict_prob, X_stack_prob, y_stack_prob, X_predict_prob = X_y_stack_class(df, metric, run_params, pickle_name)
+            X_stack_prob_player = X_stack_prob[['player', 'year']].copy()
 
-        # class metrics
-        final_models = ['lr_c', 'lgbm_c', 'rf_c', 'gbm_c', 'gbmh_c', 'xgb_c', 'knn_c']
-        best_val_prob, best_pred_prob = load_run_models(run_params, final_models, X_stack_prob, y_stack_prob, X_predict_prob, pickle_name)
-        if show_plot: show_calibration_curve(y_stack_prob, best_val_prob.mean(axis=1), n_bins=8)
+            X_stack_prob, y_stack_prob = join_train_features(X_stack_player, X_stack_prob, y_stack_prob)
+            X_predict_prob = join_predict_features(df_predict, X_predict, X_predict_prob)
+            X_stack_prob = create_value_compare_col(X_stack_prob)
+            X_predict_prob = create_value_compare_col(X_predict_prob)
 
-        output_prob = create_output_class(df_predict_prob.assign(metric=metric), best_pred_prob, output_teams)
-        output_prob = pd.merge(output_prob, output, on=['player', 'game_date'])
-        output_prob = add_dk_lines(output_prob)
+            stack_prob_grp = get_group_col(pd.concat([X_stack_prob_player, X_stack_prob], axis=1), teams)
 
-        output_prob = output_prob[['player', 'game_date', 'team', 'opponent', 'metric', 'decimal_odds', 'value', 
-                                    'prob_over', 'pred_mean', 'pred_q25', 'pred_q50', 'pred_q75']]
-        output_prob = output_prob.assign(pred_vers=run_params['pred_vers'], ens_vers=run_params['ensemble_vers'], 
-                                        train_date=run_params['train_date'], parlay=run_params['parlay'])
-        output_prob = np.round(output_prob,3).sort_values(by='prob_over', ascending=False)
-        display(output_prob)
+            if 'no_odds' in run_params['ensemble_vers']:
+                X_stack_prob = X_stack_prob.drop('decimal_odds', axis=1)
+                X_predict_prob = X_predict_prob.drop('decimal_odds', axis=1)
 
-        del_str = f'''metric='{metric}'
-                    AND game_date={run_params['test_time_split']} 
-                    AND pred_vers='{run_params['pred_vers']}'
-                    AND ens_vers='{run_params['ensemble_vers']}'
-                    AND train_date={run_params['train_date']}
-                    AND parlay={run_params['parlay']}
-                    '''
-        dm.delete_from_db('Simulation', 'Over_Probability', del_str, create_backup=False)
-        dm.write_to_db(output_prob,'Simulation', 'Over_Probability', 'append')
+            # class metrics
+            final_models = ['lr_c', 'lgbm_c', 'rf_c', 'gbm_c', 'gbmh_c', 'xgb_c']
+
+            if 'weight' in run_params['ensemble_vers']:
+                X_stack_prob['wt_col'] = 1 - abs(X_stack_prob.decimal_odds-2)
+                X_predict_prob['wt_col'] = 1 - abs(X_predict_prob.decimal_odds-2)
+                wt_col = 'wt_col'
+            else: 
+                wt_col = None
+                final_models.append('knn_c')
+
+            best_val_prob, best_pred_prob = load_run_models(run_params, final_models, X_stack_prob, y_stack_prob, X_predict_prob, 
+                                                            model_obj=pickle_name, grp=stack_prob_grp, run_adp=True, wt_col=wt_col)
+            if show_plot: show_calibration_curve(y_stack_prob, best_val_prob.mean(axis=1), n_bins=8)
+
+            output_prob = create_output_class(df_predict_prob.assign(metric=metric), best_pred_prob, output_teams)
+            output_prob = pd.merge(output_prob, output, on=['player', 'game_date'])
+            output_prob = add_dk_lines(output_prob)
+
+            output_prob = output_prob[['player', 'game_date', 'team', 'opponent', 'metric', 'decimal_odds', 'value', 
+                                        'prob_over', 'pred_mean', 'pred_q25', 'pred_q50', 'pred_q75']]
+            output_prob = output_prob.assign(pred_vers=run_params['pred_vers'], ens_vers=run_params['ensemble_vers'], 
+                                            train_date=run_params['train_date'], parlay=run_params['parlay'])
+            output_prob = np.round(output_prob,3).sort_values(by='prob_over', ascending=False)
+            display(output_prob)
+
+            del_str = f'''metric='{metric}'
+                        AND game_date={run_params['test_time_split']} 
+                        AND pred_vers='{run_params['pred_vers']}'
+                        AND ens_vers='{run_params['ensemble_vers']}'
+                        AND train_date={run_params['train_date']}
+                        AND parlay={run_params['parlay']}
+                        '''
+            dm.delete_from_db('Simulation', 'Over_Probability', del_str, create_backup=False)
+            dm.write_to_db(output_prob,'Simulation', 'Over_Probability', 'append')
 
 #%%
 
-def run_check(min_game_date, train_date, no_odds=True, yes_odds=True, parlay=0):
+def run_check(min_game_date, train_date, ens_vers, parlay=0, ):
 
-    if no_odds: ens_vers_no_odds = 'mae1_rsq1_fullstack_allstats_diff_grp_no_odds'
-    else: ens_vers_no_odds = ''
-    
-    if yes_odds: ens_vers_yes_odds = 'mae1_rsq1_fullstack_allstats_diff_grp'
-    else: ens_vers_yes_odds = ''
-
-    print(f'Running check for train_date={train_date} with no_odds={no_odds} and yes_odds={yes_odds}')
+    print(f'Running check for train_date={train_date}')
 
     base_query = f''' 
             SELECT player, metric, game_date, team, opponent, decimal_odds, value,
@@ -866,23 +877,21 @@ def run_check(min_game_date, train_date, no_odds=True, yes_odds=True, parlay=0):
             FROM Over_Probability
             WHERE game_date >= {min_game_date}
                     AND train_date = {train_date}
-                    AND ens_vers IN ('{ens_vers_no_odds}', '{ens_vers_yes_odds}')
+                    AND ens_vers IN ('{ens_vers}')
                     AND parlay={parlay}
             GROUP BY player, metric, game_date, team, opponent, decimal_odds, value
     '''
     all_pred = dm.read(f'''
 
-                    SELECT *, decimal_odds as weighting
+                    SELECT *, 1-abs(decimal_odds-2) as weighting
                     FROM ({base_query})
                     WHERE prob_over >= 0.5
-                     --   AND pred_q25 > value * 0.85
                         AND pred_mean > value
                         AND pred_q50 > value     
                     UNION  
-                    SELECT *, decimal_odds/(decimal_odds-0.88) as weighting
+                    SELECT *, 1-abs(decimal_odds-2) as weighting
                     FROM ({base_query})
                     WHERE prob_over < 0.5
-                    --    AND pred_q75 < value * 1.15
                         AND pred_mean < value
                         AND pred_q50 < value 
                 
@@ -890,12 +899,12 @@ def run_check(min_game_date, train_date, no_odds=True, yes_odds=True, parlay=0):
     
     return all_pred
 
-min_game_date = 20230321
-train_date = 20230321
-no_odds = True
-yes_odds = False
-parlay_chk = 1
-all_pred = run_check(min_game_date, train_date, no_odds=no_odds, yes_odds=yes_odds, parlay=parlay_chk)
+min_game_date = 20230328
+train_date = 20230328
+parlay_chk = 0
+ens_vers = ('mae1_rsq1_fullstack_allstats_diff_grp_no_odds')
+# ens_vers = ('mae1_rsq1_grp_basic_yes_odds_2weighted')
+all_pred = run_check(min_game_date, train_date, ens_vers, parlay=parlay_chk)
 
 actual_pts, run_params = load_data(run_params)
 actual_pts_stats = ['player', 'game_date', 'y_act_points', 'y_act_rebounds', 'y_act_assists', 
@@ -921,21 +930,22 @@ metrics = [
            'points', 
             'rebounds', 
             'assists',
-            'three_pointers', 
+            # 'three_pointers', 
          #   'points_rebounds',
          #    'points_assists', 
         #      'points_rebounds_assists',
          #     'assists_rebounds',
-          'steals',
-           'blocks',
-         #   'steals_blocks'
+        #   'steals',
+        #    'blocks',
+        #    'steals_blocks'
 ]
 
 all_pred_disp = all_pred[all_pred.metric.isin(metrics)]
 print('number_samples:', all_pred_disp.shape[0])
 skm, _, _ = get_skm(df_train, 'class', [])
+
 _ = skm.test_scores(all_pred_disp.is_over, np.where(all_pred_disp.prob_over >= 0.5, 1, 0), sample_weight=all_pred_disp.weighting)
-show_calibration_curve(all_pred_disp.is_over, all_pred_disp.prob_over, n_bins=8)
+show_calibration_curve(all_pred_disp.is_over, all_pred_disp.prob_over, n_bins=6)
 all_pred_disp.head(40).append(all_pred_disp.tail(40))
 
 for m in metrics:
@@ -944,12 +954,43 @@ for m in metrics:
     print(m, 'number_samples:', all_pred_disp.shape[0])
     skm, _, _ = get_skm(df_train, 'class', [])
     _ = skm.test_scores(all_pred_disp.is_over, np.where(all_pred_disp.prob_over >= 0.5, 1, 0), sample_weight=all_pred_disp.weighting)
-    show_calibration_curve(all_pred_disp.is_over, all_pred_disp.prob_over, n_bins=8)
+    show_calibration_curve(all_pred_disp.is_over, all_pred_disp.prob_over, n_bins=6)
     # all_pred.head(40).append(all_pred.tail(40))
 
 # %%
 
+all_pred_disp = all_pred[all_pred.metric.isin(metrics)]
+teams_opponent = []
+for t, o in all_pred_disp[['team', 'opponent']].values:
+    teams_opponent.append(sorted([t, o]))
 
+all_pred_disp[['team', 'opponent']] = teams_opponent
+
+# all_pred_disp = all_pred_disp[all_pred_disp.prob_over < 0.5].reset_index(drop=True)
+
+all_pred_disp.loc[all_pred_disp.prob_over < 0.5, ['decimal_odds']] = (1 / all_pred_disp.loc[all_pred_disp.prob_over < 0.5, ['decimal_odds']]) + 1
+all_pred_disp.loc[all_pred_disp.prob_over < 0.5, ['is_over']] = np.where(all_pred_disp.loc[all_pred_disp.prob_over < 0.5, ['is_over']].values == 1, 0, 1)
+all_pred_disp.loc[all_pred_disp.prob_over < 0.5, ['prob_over']] = 1 - all_pred_disp.loc[all_pred_disp.prob_over < 0.5, ['prob_over']].values
+
+all_pred_disp = all_pred_disp.sort_values(by=['game_date', 'team', 'prob_over'], ascending=[False,False, False]).reset_index(drop=True)
+all_pred_disp['prob_rank'] = all_pred_disp.groupby(['game_date', 'team']).cumcount()
+all_pred_disp = all_pred_disp[all_pred_disp.prob_rank == 0]
+all_pred_disp = all_pred_disp.sort_values(by=['game_date', 'prob_over'], ascending=[False,False]).reset_index(drop=True)
+all_pred_disp['prob_rank'] = all_pred_disp.groupby(['game_date']).cumcount()
+
+results_all = all_pred_disp[(all_pred_disp.prob_rank <=2) & (all_pred_disp.prob_rank >= 0)]
+results = results_all.groupby('game_date').agg({'is_over': 'sum', 'player': 'count', 'decimal_odds': np.prod})
+results['wager'] = 15
+results['winnings'] = np.where(results.is_over==results.player, results.wager * results.decimal_odds, 0)
+
+print('Percent Correct:', results.is_over.sum() / (results.player.sum()))
+print('Percent Won:', results[results.is_over==results.player].shape[0] / results.shape[0])
+print('Total Winnings:', results.winnings.sum() - results.wager.sum())
+results
+
+#%%
+
+results_all
 #%%
 # test_dates = [
 #     # ['2023-03-09', '2023-03-09'],
@@ -1122,97 +1163,181 @@ for m in metrics:
 # display(output_prob.head(40))
 # display(output_prob.tail(40))
 
-# #%%
-# from sklearn.linear_model import LogisticRegression
-# from sklearn.preprocessing import StandardScaler
-# from sklearn.model_selection import cross_val_predict
+#%%
+
+all_pred = dm.read(f'''
+                SELECT player,
+                       game_date, 
+                       team, 
+                       opponent,
+                       metric,
+                       AVG(decimal_odds) decimal_odds,
+                       AVG(value) value,
+                       AVG(prob_over) prob_over,
+                       AVG(pred_mean) pred_mean,
+                       AVG(pred_q25) pred_q25,
+                       AVG(pred_q50) pred_q50,
+                       AVG(pred_q75) pred_q75
+                FROM Over_Probability
+                WHERE game_date >= 20230328
+                      AND decimal_odds <= 2.3
+                      AND decimal_odds >= 1.6
+                      AND parlay=0
+                      AND train_date IN ( 20230321, 20230328)
+                      AND ens_vers='mae1_rsq1_grp_basic_yes_odds'
+                GROUP BY player, game_date, team, opponent, metric
+                ''', 'Simulation')
 
 # all_pred = dm.read(f'''
-#                 SELECT player,
-#                        game_date, 
-#                        team, 
-#                        opponent,
-#                        metric,
-#                        AVG(decimal_odds) decimal_odds,
-#                        AVG(value) value,
-#                        AVG(prob_over) prob_over,
-#                        AVG(pred_mean) pred_mean,
-#                        AVG(pred_q25) pred_q25,
-#                        AVG(pred_q50) pred_q50,
-#                        AVG(pred_q75) pred_q75
+#                 SELECT *
 #                 FROM Over_Probability
-#                 WHERE game_date >= 20230201
-#                       AND decimal_odds <= 2.1
-#                       AND decimal_odds >= 1.7
-#                 GROUP BY player, game_date, team, opponent, metric
+#                 WHERE game_date >= 20230321
+#                     --  AND decimal_odds <= 2.3
+#                     --  AND decimal_odds >= 1.6
+#                       AND parlay=0
+#                       AND train_date IN ( 20230321, 20230328)
+#                       AND ens_vers='mae1_rsq1_grp_basic_yes_odds'
 #                 ''', 'Simulation')
 
-# actual_pts, _ = load_data(run_params)
-# actual_pts = actual_pts[['player', 'game_date', 'y_act_points', 'y_act_rebounds', 
-#                          'y_act_assists', 'y_act_three_pointers']] 
-# actual_pts.columns = [c.replace('y_act_', '') for c in actual_pts.columns]
-# actual_pts['points_rebounds'] = actual_pts.points + actual_pts.rebounds
-# actual_pts['points_assists'] = actual_pts.points + actual_pts.rebounds
-# actual_pts['points_rebounds_assists'] = actual_pts.points + actual_pts.rebounds + actual_pts.assists
+actual_pts, _ = load_data(run_params)
+actual_pts = actual_pts[['player', 'game_date', 'y_act_points', 'y_act_rebounds', 
+                         'y_act_assists', 'y_act_three_pointers', 'y_act_steals', 'y_act_blocks']] 
+actual_pts.columns = [c.replace('y_act_', '') for c in actual_pts.columns]
+actual_pts['points_rebounds'] = actual_pts.points + actual_pts.rebounds
+actual_pts['points_assists'] = actual_pts.points + actual_pts.rebounds
+actual_pts['points_rebounds_assists'] = actual_pts.points + actual_pts.rebounds + actual_pts.assists
+actual_pts['steals_blocks'] = actual_pts.steals + actual_pts.blocks
 
-# actual_pts = pd.melt(actual_pts, id_vars=['player', 'game_date'], var_name=['metric'], value_name='actuals')
+actual_pts = pd.melt(actual_pts, id_vars=['player', 'game_date'], var_name=['metric'], value_name='actuals')
 
-# all_pred = pd.merge(all_pred, actual_pts, on=['player','game_date', 'metric'], how='left')
-# all_pred['y_act'] = np.where(all_pred.actuals > all_pred.value, 1, 0)
-# all_pred = all_pred.sort_values(by='prob_over', ascending=False).reset_index(drop=True)
-# all_pred = all_pred[~(all_pred.actuals.isnull()) | (all_pred.game_date==run_params['test_time_split'])]
+all_pred = pd.merge(all_pred, actual_pts, on=['player','game_date', 'metric'], how='left')
+all_pred['y_act'] = np.where(all_pred.actuals > all_pred.value, 1, 0)
+all_pred = all_pred.sort_values(by='prob_over', ascending=False).reset_index(drop=True)
+all_pred = all_pred[~(all_pred.actuals.isnull()) | (all_pred.game_date==run_params['test_time_split'])]
 
-# train = all_pred.copy().sample(frac=1).reset_index(drop=True)
+train = all_pred.copy().sample(frac=1).reset_index(drop=True)
 
-# train = train[
-#     (train.metric.isin([
-#                      'points', 
-#                         'rebounds', 
-#                         'assists',
-#                        'three_pointers', 
-#                         'points_rebounds',
-#                         'points_assists', 
-#                         'points_rebounds_assists'
-#                    ]))
-#             ].reset_index(drop=True)
+train = train[
+    (train.metric.isin([
+                      'points', 
+                        'rebounds', 
+                        'assists',
+                      'three_pointers', 
+                        # 'points_rebounds',
+                        # 'points_assists', 
+                        # 'points_rebounds_assists',
+                        # 'steals',
+                        # 'blocks',
+                        'steal_blocks'
+                   ]))
+            ].reset_index(drop=True)
 
-# skm, _, _ = get_skm(train, 'class', [])
+skm, _, _ = get_skm(train, 'class', [])
 
-# def prepare_X(df, run_params):
+def prepare_X(df, run_params):
 
-#     X = df.drop(['player', 'opponent', 'actuals', 'y_act', 'team',
-#                  ], axis=1)
+    X = df.drop(['player', 'opponent', 'actuals', 'y_act', 'team',
+                 ], axis=1)
+    
+    try: 
+        X['no_odds'] = np.where(X.ens_vers.str.contains('no_odds'), 1, 0)
+        X['train_date'] = X.train_date.astype('str')
+    except:
+        pass
 
-#     for c in ['pred_mean' ,'pred_q25', 'pred_q50', 'pred_q75']:
-#         X[f'{c}_vs_value'] = X[c] - X.value
-#         X[f'{c}_over_value'] = X[c] / X.value
-
-
-#     for c in ['metric',# 'team'#  'pred_vers', 'ens_vers','team',
-#                 ]:
-#         X = pd.concat([X, pd.get_dummies(X[c])], axis=1).drop(c, axis=1)
-
-#     X_train = X[X.game_date < run_params['test_time_split']].reset_index(drop=True)
-#     X_test = X[X.game_date == run_params['test_time_split']].reset_index(drop=True)
-
-#     return X_train, X_test
-
-# X_train, X_test = prepare_X(train, run_params)
-# y_train = train.loc[train.game_date < run_params['test_time_split'], 'y_act'].reset_index(drop=True)
-
-# full_stack_features=False
-# std_model=True
-# stack_model=False
-# final_model, _, val_stats = run_stack_models('lr_c', 150, X_train, y_train, [], [], 
-#                                     pd.DataFrame(), model_obj='class',
-#                                         num_k_folds=3, print_coef=True, proba=True)
-# show_calibration_curve(y_train, val_stats, n_bins=10)
-
-# test = train[train.game_date==run_params['test_time_split']].reset_index(drop=True)
-# test['final_prob'] = final_model[0].predict_proba(X_test)[:,1]
-# test = test.sort_values(by='final_prob', ascending=False).reset_index(drop=True)
-# test = test.drop([ 'actuals', 'y_act'], axis=1)
-# display(test.head(40))
-# display(test.tail(30))
+    for c in ['pred_mean' ,'pred_q25', 'pred_q50', 'pred_q75']:
+        X[f'{c}_vs_value'] = X[c] - X.value
+        X[f'{c}_over_value'] = X[c] / X.value
 
 
+    for c in ['metric', 'ens_vers', 'train_date']:
+        try:X = pd.concat([X, pd.get_dummies(X[c])], axis=1).drop(c, axis=1)
+        except:pass
+
+    X_train = X[X.game_date < run_params['test_time_split']].reset_index(drop=True)
+    X_test = X[X.game_date == run_params['test_time_split']].reset_index(drop=True)
+
+    return X_train, X_test
+
+X_train, X_test = prepare_X(train, run_params)
+y_train = train.loc[train.game_date < run_params['test_time_split'], 'y_act'].reset_index(drop=True)
+
+
+skm, _, _ = get_skm(pd.concat([X_train, y_train], axis=1), 'class', to_drop=[])
+pipe = skm.model_pipe([
+                            skm.piece('std_scale'),
+                            skm.piece('k_best_c'),
+                            skm.piece('lr_c')
+                        ])
+params = skm.default_params(pipe, 'rand')
+params[f'k_best_c__k'] = range(1, 50)
+i=1234
+
+best_model, stack_scores, stack_pred = skm.best_stack(pipe, params,
+                                                      X_train, y_train, n_iter=run_params['n_iters'], 
+                                                      run_adp=False, print_coef=True,
+                                                      sample_weight=False, proba=True,
+                                                      num_k_folds=num_k_folds, alpha=None,
+                                                      random_state=(i*12)+(i*17), grp=X_train.game_date)
+
+show_calibration_curve(stack_pred['y'], stack_pred['stack_pred'], n_bins=10)
+
+test = train[train.game_date==run_params['test_time_split']].reset_index(drop=True)
+test['final_prob'] = best_model.predict_proba(X_test)[:,1]
+test = test.sort_values(by='final_prob', ascending=False).reset_index(drop=True)
+test = test.drop([ 'actuals', 'y_act'], axis=1)
+display(test.head(40))
+display(test.tail(30))
+
+
+#%%
+
+model_obj = 'reg'
+final_m = 'enet'
+kb = 'k_best'
+alpha=None
+grp = None
+i = 0
+print_coef = True
+
+X_coef = X_stack.copy()
+y_coef = y_stack.copy()
+
+skm, _, _ = get_skm(pd.concat([X_coef, y_coef], axis=1), model_obj, to_drop=[])
+pipe, params = get_full_pipe(skm, final_m, stack_model=True, alpha=alpha)
+
+if model_obj=='class': proba = True
+else: proba = False
+
+if 'gbmh' in final_m or 'knn' in final_m: print_coef = False
+else: print_coef = print_coef
+
+best_model, stack_scores, stack_pred = skm.best_stack(pipe, params,
+                                                      X_coef, y_coef, n_iter=run_params['n_iters'], 
+                                                      run_adp=False, print_coef=True,
+                                                      sample_weight=False, proba=proba,
+                                                      num_k_folds=num_k_folds, alpha=alpha,
+                                                      random_state=(i*12)+(i*17), grp=grp)
+
+show_scatter_plot(stack_pred['stack_pred'], stack_pred['y'], r2=True)
+# %%
+
+pipeline = best_model
+pipeline.fit(X_train,y_train)
+
+# get the feature names from the original dataset
+feature_names = X_train.columns
+
+# get the indices of the selected features
+selected_features = pipeline.named_steps['k_best_c'].get_support()
+
+# filter the feature names to get only the selected features
+selected_feature_names = feature_names[selected_features]
+
+# get the sorted indices of the coefficients
+coef_indices = np.argsort(np.abs(pipeline.named_steps['lr_c'].coef_[0]))[::-1]
+
+# print the feature names and corresponding coefficients in order
+for feature, coef in zip(selected_feature_names[coef_indices], pipeline.named_steps['lr_c'].coef_[0][coef_indices]):
+    print(f'{feature}: {coef:.4f}')
+# %%

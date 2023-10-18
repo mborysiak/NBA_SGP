@@ -12,8 +12,9 @@ from ff.db_operations import DataManage
 from ff import general as ffgeneral
 from skmodel import SciKitModel
 
-import pandas_bokeh
-pandas_bokeh.output_notebook()
+from hyperopt import Trials
+from wakepy import keep
+from joblib import Parallel, delayed
 
 import warnings
 warnings.filterwarnings("ignore", category=RuntimeWarning) 
@@ -36,19 +37,22 @@ dm = DataManage(db_path)
 # Settings
 #---------------
 
+verbosity=50
 run_params = {
     
     # set year and week to analyze
     'cv_time_input': '2023-02-20',
-    'train_time_split': '2023-03-28',
+    'train_time_split': '2023-03-14',
     'metrics': [
                 'points', 'assists', 'rebounds', 'three_pointers',   
                 'steals_blocks', 'blocks', 'steals', 
              #   'total_points', 'spread'
              #   'points_assists', 'points_rebounds', 'points_rebounds_assists', 'assists_rebounds'  
                 ],
-    'n_iters': 25,
-    'n_splits': 5
+    'n_iters': 2,
+    'n_splits': 5,
+    'parlay': False,
+    'opt_type': 'bayes'
 }
 
 run_params['cv_time_input'] = int(run_params['cv_time_input'].replace('-', ''))
@@ -63,7 +67,7 @@ matt_wt = 0
 brier_wt = 1
 
 # set version and iterations
-vers = 'mse1_lowsample_perc'
+vers = 'mse1_brier1'
 
 #----------------
 # Data Loading
@@ -194,8 +198,8 @@ def create_value_columns(df, metric):
 
     for c in df.columns:
         if metric in c:
-            df[c + '_vs_value'] = df[c] - df.value
-            df[c + '_over_value'] = df[c] / df.value
+            df = pd.concat([df, pd.Series(df[c]-df.value, name=f'{c}_vs_value')], axis=1)
+            df = pd.concat([df, pd.Series(df[c]/df.value, name=f'{c}_over_value')], axis=1)
 
     return df
 
@@ -225,26 +229,87 @@ def get_over_under_class(df, metric, run_params, model_obj='class'):
 #----------------
 
 def output_dict():
-    return {'pred': {}, 'actual': {}, 'scores': {}, 'models': {}, 'full_hold':{}}
+    return {'pred': {}, 'actual': {}, 'scores': {}, 'models': {}, 'full_hold':{}, 'param_scores': {}, 'trials': {}}
 
 
-def update_output_dict(label, m, suffix, out_dict, oof_data, best_models):
+def get_trial_times(root_path, run_params):
 
-    # append all of the metric outputs
-    lbl = f'{label}_{m}{suffix}'
-    out_dict['pred'][lbl] = oof_data['hold']
-    out_dict['actual'][lbl] = oof_data['actual']
-    out_dict['scores'][lbl] = oof_data['scores']
-    out_dict['models'][lbl] = best_models
-    out_dict['full_hold'][lbl] = oof_data['full_hold']
+    recent_save = get_newest_folder_with_keywords(f"{root_path}/Model_Outputs/", [run_params['cur_metric']], [str(run_params['train_time_split'])])
+    all_trials = load_pickle(recent_save, 'all_trials')
 
-    return out_dict
+    times = []
+    for k,v in all_trials.items():
+        if k!='reg_adp':
+            max_trial = len(v.trials) - 1
+            trial_times = []
+            for i in range(max_trial-100, max_trial):
+                trial_times.append(v.trials[i]['refresh_time'] - v.trials[i]['book_time'])
+            trial_time = np.mean(trial_times).seconds
+            times.append([k, np.round(trial_time / 60, 2)])
 
+    time_per_trial = pd.DataFrame(times, columns=['model', 'time_per_trial']).sort_values(by='time_per_trial', ascending=False)
+    time_per_trial['total_time'] = time_per_trial.time_per_trial * 100
+    return time_per_trial
+
+def calc_num_trials(time_per_trial, run_params):
+
+    n_iters = run_params['n_iters']
+    time_per_trial['percentile_90_time'] = time_per_trial.time_per_trial.quantile(0.8)
+    time_per_trial['num_trials'] = n_iters * time_per_trial.percentile_90_time / time_per_trial.time_per_trial
+    time_per_trial['num_trials'] = time_per_trial.num_trials.apply(lambda x: np.min([n_iters, np.max([x, n_iters/4])])).astype('int')
+    
+    return {k:v for k,v in zip(time_per_trial.model, time_per_trial.num_trials)}
+
+def reg_params(df_train, min_samples, num_trials, run_params):
+    model_list = ['gbm', 'gbmh', 'rf', 'xgb', 'lgbm', 'ridge', 'svr', 'lasso', 'bridge', 'enet', 'knn']
+    label = 'reg'
+    func_params_reg = []
+    for i, m  in enumerate(model_list):
+        try: num_trial = num_trials[f'{label}_{m}']
+        except: num_trial = run_params['n_iters']
+        func_params_reg.append([m, label, df_train, 'reg', i, min_samples, '', num_trial])
+
+    return func_params_reg
+
+def class_params(df_train_class, min_samples, num_trials, run_params, is_parlay=False):
+    model_list = ['gbm_c', 'rf_c', 'gbmh_c', 'lgbm_c', 'lr_c', 'knn_c','xgb_c']
+    func_params_c = []
+    if is_parlay: label = 'parlay_class'
+    else: label = 'class'
+ 
+    for i, m  in enumerate(model_list):
+        try: num_trial = num_trials[f'{label}_{m}']
+        except: num_trial = run_params['n_iters']
+        func_params_c.append([m, label, df_train_class, 'class', i, min_samples, '', num_trial])
+
+    return func_params_c
+
+def quant_params(df_train, alphas, min_samples, num_trials, run_params):
+    model_list =  ['qr_q', 'lgbm_q', 'gbm_q', 'gbmh_q']
+    func_params_q = []
+    for alph in alphas:
+        label = f'quant_{alph}'
+        for i, m  in enumerate(model_list):
+            try: num_trial = num_trials[f'{label}_{m}']
+            except: num_trial = run_params['n_iters']
+            func_params_q.append([m, label, df_train, 'quantile', i, min_samples, alph, num_trial])
+
+    return func_params_q
+
+
+def order_func_params(func_params, trial_times):
+    
+    if trial_times is not None:
+        missing_trials = [f'{x[1]}_{x[0]}' for x in func_params if f'{x[1]}_{x[0]}' not in trial_times.values]
+        trial_order = missing_trials + list(trial_times.model.values)
+        func_params = sorted(func_params, key=lambda x: trial_order.index(f'{x[1]}_{x[0]}'))
+
+    return func_params
 
 def get_skm(skm_df, model_obj, to_drop):
     
     skm_options = {
-        'reg': SciKitModel(skm_df, model_obj='reg', r2_wt=r2_wt, sera_wt=sera_wt, mse_wt=mse_wt, mae_wt=mae_wt),
+        'reg': SciKitModel(skm_df, model_obj='reg', r2_wt=r2_wt, sera_wt=sera_wt, mse_wt=mse_wt),
         'class': SciKitModel(skm_df, model_obj='class', brier_wt=brier_wt, matt_wt=matt_wt),
         'quantile': SciKitModel(skm_df, model_obj='quantile')
     }
@@ -255,14 +320,15 @@ def get_skm(skm_df, model_obj, to_drop):
     return skm, X, y
 
 
-def get_full_pipe(skm, m, alpha=None, stack_model=False, min_samples=10):
+def get_full_pipe(skm, m, alpha=None, stack_model=False, min_samples=10, bayes_rand='rand'):
 
-    if m=='test_class':
-        pipe = skm.model_pipe([
-                            skm.piece('std_scale'),
-                            skm.piece('k_best_c'), 
-                            skm.piece('lr_c')
-                        ])
+    if m == 'adp':
+        
+        # set up the ADP model pipe
+        pipe = skm.model_pipe([skm.piece('feature_select'), 
+                               skm.piece('std_scale'), 
+                               skm.piece('k_best'),
+                               skm.piece('lr')])
 
     elif stack_model:
         pipe = skm.model_pipe([
@@ -282,7 +348,7 @@ def get_full_pipe(skm, m, alpha=None, stack_model=False, min_samples=10):
                                                 ]),
                                 skm.piece('k_best'),
                                 skm.piece(m)])
-        
+
     elif skm.model_obj == 'class':
         pipe = skm.model_pipe([skm.piece('random_sample'),
                                skm.piece('std_scale'), 
@@ -302,50 +368,138 @@ def get_full_pipe(skm, m, alpha=None, stack_model=False, min_samples=10):
                                 skm.piece(m)
                                 ])
 
-        if m == 'qr_q': pipe.steps[-1][-1].quantile = alpha
+        if m in ('qr_q', 'gbmh_q'): pipe.steps[-1][-1].quantile = alpha
         elif m in ('rf_q', 'knn_q'): pipe.steps[-1][-1].q = alpha
         else: pipe.steps[-1][-1].alpha = alpha
     
 
 
     # get the params for the current pipe and adjust if needed
-    params = skm.default_params(pipe, 'rand')
-    if m=='knn': params['knn__n_neighbors'] = range(1, min_samples-1)
-    if m=='knn_c': params['knn_c__n_neighbors'] = range(1, min_samples-1)
-    if m=='knn_q': params['knn_q__n_neighbors'] = range(1, min_samples-1)
-    if stack_model: params['k_best__k'] = range(2, 40)
-
+    params = skm.default_params(pipe, bayes_rand, min_samples=min_samples)
+    if m=='adp': 
+        params['feature_select__cols'] = [
+                                            ['game_date', 'year', 'week', 'ProjPts', 'dk_salary', 'projected_points', 'fantasyPoints', 'ffa_points', 'avg_proj_points', 'fc_proj_fantasy_pts_fc', 'log_fp_rank', 'log_avg_proj_rank'],
+                                            ['year', 'week',  'ProjPts', 'dk_salary', 'projected_points', 'fantasyPoints', 'ffa_points', 'avg_proj_points', 'fc_proj_fantasy_pts_fc', 'log_fp_rank', 'log_avg_proj_rank'],
+                                            [ 'ProjPts', 'dk_salary','projected_points', 'fantasyPoints', 'ffa_points', 'avg_proj_points', 'fc_proj_fantasy_pts_fc', 'log_fp_rank', 'log_avg_proj_rank']
+                                        ]
+        params['k_best__k'] = range(1, 14)
+    
     return pipe, params
 
+def update_trials_params(trials, m, params, pipe):
 
-def get_model_output(model_name, cur_df, model_obj, out_dict, run_params, i, min_samples=10, alpha=''):
+    m_params = [p.split('__')[1] for p in params.keys() if m in p]
 
-    print(f'\n{model_name}\n============\n')
+    hyper_params = {
+        p: pipe.steps[-1][1].get_params()[p] for p in m_params
+    }
 
-    skm, X, y = get_skm(cur_df, model_obj, to_drop=run_params['drop_cols'])
-    pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples)
-    
+    for trial in trials:
+        # Update each trial with the new hyperparameters
+        for k,v in hyper_params.items():
+            if k not in trial['misc']['vals']:
+                trial['misc']['vals'][k] = [v]
+                trial['misc']['idxs'][k] = [trial['tid']]
+
+    return trials
+
+def get_proba(model_obj):
     if model_obj == 'class': proba = True
     else: proba = False
+    return proba
+
+def get_newest_folder_with_keywords(path, keywords, ignore_keywords=None):
+    folders = [f for f in os.listdir(path) if os.path.isdir(os.path.join(path, f))]
+    
+    # Apply ignore_keywords if provided
+    if ignore_keywords:
+        folders = [f for f in folders if not any(ignore_keyword in f for ignore_keyword in ignore_keywords)]
+    
+    matching_folders = [f for f in folders if all(keyword in f for keyword in keywords)]
+    
+    if not matching_folders:
+        return None
+    
+    newest_folder = max(matching_folders, key=lambda f: os.path.getctime(os.path.join(path, f)))
+    return os.path.join(path, newest_folder)
+
+
+def get_trials(label, m, bayes_rand):
+
+    recent_save = get_newest_folder_with_keywords(f"{root_path}/Model_Outputs/", [run_params['cur_metric']], [str(run_params['train_time_split'])])
+
+    if recent_save is not None and bayes_rand=='bayes': 
+        try:
+            trials = load_pickle(recent_save, 'all_trials')
+            trials = trials[f'{label}_{m}']
+            print('Loading previous trials')
+        except:
+            print('No Previous Trials Exist')
+            trials = Trials()
+
+    elif bayes_rand=='bayes':
+        print('Creating new Trials object')
+        trials = Trials()
+
+    else:
+        trials = None
+
+    return trials
+    
+
+def get_model_output(model_name, label, cur_df, model_obj, run_params, i, min_samples=10, alpha='', n_iter=20):
+
+    print(f'\n{model_name}\n============\n')
+    
+    bayes_rand = run_params['opt_type']
+    proba = get_proba(model_obj)
+    trials = get_trials(label, model_name, bayes_rand)
+
+    skm, X, y = get_skm(cur_df, model_obj, to_drop=run_params['drop_cols'])
+    pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples, bayes_rand=bayes_rand)
+    if trials is not None: trials = update_trials_params(trials, model_name, params, pipe)
 
     # fit and append the ADP model
-    import time
     start = time.time()
-    best_models, oof_data, _ = skm.time_series_cv(pipe, X, y, params, n_iter=run_params['n_iters'], 
-                                                  n_splits=run_params['n_splits'], col_split='game_date', 
-                                                  bayes_rand='custom_rand', time_split=run_params['cv_time_input'],
-                                                  proba=proba, random_seed=(i+7)*19+(i*12)+6, alpha=alpha)
-
+    best_models, oof_data, param_scores, trials = skm.time_series_cv(pipe, X, y, params, n_iter=n_iter, 
+                                                                     n_splits=run_params['n_splits'], col_split='game_date', 
+                                                                     time_split=run_params['cv_time_input'],
+                                                                     bayes_rand=bayes_rand, proba=proba, trials=trials,
+                                                                     random_seed=(i+7)*19+(i*12)+6, alpha=alpha)
+    best_models = [bm.fit(X,y) for bm in best_models]
     print('Time Elapsed:', np.round((time.time()-start)/60,1), 'Minutes')
     
-    col_label = str(alpha)
-    out_dict = update_output_dict(model_obj, model_name, col_label, out_dict, oof_data, best_models)
-
-    return out_dict, best_models, oof_data
+    return best_models, oof_data, param_scores, trials
 
 #-----------------
 # Saving Data / Handling
 #-----------------
+
+
+def update_output_dict(out_dict, label, m, result):
+
+    best_models, oof_data, param_scores, trials = result
+
+    # append all of the metric outputs
+    lbl = f'{label}_{m}'
+    out_dict['pred'][lbl] = oof_data['hold']
+    out_dict['actual'][lbl] = oof_data['actual']
+    out_dict['scores'][lbl] = oof_data['scores']
+    out_dict['models'][lbl] = best_models
+    out_dict['full_hold'][lbl] = oof_data['full_hold']
+    out_dict['param_scores'][lbl] = param_scores
+    out_dict['trials'][lbl] = trials
+
+    return out_dict
+
+
+def unpack_results(out_dict, func_params, results):
+    for fp, result in zip(func_params, results):
+        model_name, label, _, _, _, _, _, _ = fp
+        out_dict = update_output_dict(out_dict, label, model_name, result)
+
+    return out_dict
+
 
 def save_pickle(obj, path, fname, protocol=-1):
     with gzip.open(f"{path}/{fname}.p", 'wb') as f:
@@ -353,24 +507,50 @@ def save_pickle(obj, path, fname, protocol=-1):
 
     print(f'Saved {fname} to path {path}')
 
+
 def load_pickle(path, fname):
     with gzip.open(f"{path}/{fname}.p", 'rb') as f:
         loaded_object = pickle.load(f)
         return loaded_object
 
-def save_output_dict(out_dict, model_output_path, label):
 
+def save_output_dict(out_dict, label, model_output_path):
+
+    label = label.split('_')[0]
     save_pickle(out_dict['pred'], model_output_path, f'{label}_pred')
     save_pickle(out_dict['actual'], model_output_path, f'{label}_actual')
     save_pickle(out_dict['models'], model_output_path, f'{label}_models')
     save_pickle(out_dict['scores'], model_output_path, f'{label}_scores')
     save_pickle(out_dict['full_hold'], model_output_path, f'{label}_full_hold')
+    save_pickle(out_dict['param_scores'], model_output_path, f'{label}_param_scores')
+    save_pickle(out_dict['trials'], model_output_path, f'{label}_trials')
 
+def show_calibration_curve(y_true, y_pred, n_bins=10):
 
+    from sklearn.calibration import calibration_curve
+    from sklearn.metrics import brier_score_loss
+
+    # Plot perfectly calibrated
+    plt.plot([0, 1], [0, 1], linestyle = '--', label = 'Ideally Calibrated')
+    
+    # Plot model's calibration curve
+    x, y = calibration_curve(y_true, y_pred, n_bins=n_bins, strategy='quantile')
+    plt.plot(y, x, marker = '.', label = 'Quantile')
+
+    # Plot model's calibration curve
+    x, y = calibration_curve(y_true, y_pred, n_bins=n_bins, strategy='uniform')
+    plt.plot(y, x, marker = '+', label = 'Uniform')
+    
+    leg = plt.legend(loc = 'upper left')
+    plt.xlabel('Average Predicted Probability in each bin')
+    plt.ylabel('Ratio of positives')
+    plt.show()
+
+    print('Brier Score:', brier_score_loss(y_true, y_pred))
 
 #%%
 
-for metric in run_params['metrics']:
+for metric in run_params['metrics'][:1]:
 
     print(f"\n==================\n{metric} {run_params['train_time_split']} {vers}\n====================")
 
@@ -381,6 +561,7 @@ for metric in run_params['metrics']:
     # load data and filter down
     pkey, model_output_path = create_pkey_output_path(metric, run_params, vers)
     df, run_params = load_data(run_params)
+    run_params['cur_metric'] = metric
     df = remove_low_counts(df)
     df = create_y_act(df, metric)
     
@@ -389,7 +570,6 @@ for metric in run_params['metrics']:
     df['team'] = 0
 
     df_train, df_predict, output_start, min_samples = train_predict_split(df, run_params)
-    df_train['y_act'] = df_train.y_act + (np.random.random(size=len(df_train)) / 1000)
 
     run_params['parlay'] = False
     df_train_class, df_predict_class = get_over_under_class(df, metric, run_params, model_obj='class')
@@ -397,48 +577,69 @@ for metric in run_params['metrics']:
 
     run_params['parlay'] = True
     df_train_parlay, df_predict_parlay = get_over_under_class(df, metric, run_params, model_obj='class')
-    # df_train_diff, df_predict_diff = get_over_under_class(df, metric, run_params, model_obj='reg')
+    df_train_diff, df_predict_diff = get_over_under_class(df, metric, run_params, model_obj='reg')
 
-    # set up blank dictionaries for all metrics
-    out_reg, out_quant, out_class, out_parlay, out_diff = output_dict(), output_dict(),  output_dict(), output_dict(), output_dict()
+    try:
+        trial_times = get_trial_times(root_path, run_params)
+        num_trials = calc_num_trials(trial_times, run_params)
+        print('Lower trials:', {k:v for k,v in num_trials.items() if v < run_params['n_iters']})
+    except:
+        num_trials = None
+        trial_times = None
+        print('No Trials Exist')
 
-    #=========
-    # Run Models
-    #=========
+    func_params = []
+    # func_params.extend(quant_params(df_train, [0.25, 0.75], min_samples,  num_trials, run_params))
+    func_params.extend(reg_params(df_train, min_samples, num_trials, run_params))
+    # func_params.extend(class_params(df_train_class, min_samples, num_trials, run_params, is_parlay=False))
+    # func_params.extend(class_params(df_train_parlay, min_samples, num_trials, run_params, is_parlay=True))
+    # func_params = order_func_params(func_params, trial_times)
     
-    # model_list = ['lr_c', 'xgb_c',  'lgbm_c', 'gbm_c', 'rf_c', 'knn_c', 'gbmh_c'] 
-    # for i, m in enumerate(model_list):
-    #     out_class, _, _= get_model_output(m, df_train_class, 'class', out_class, run_params, i, min_samples)
-    # save_output_dict(out_class, model_output_path, 'class')
-
-    # model_list = ['lr_c', 'xgb_c',  'lgbm_c', 'gbm_c', 'rf_c', 'knn_c', 'gbmh_c'] 
-    # for i, m in enumerate(model_list):
-    #     out_parlay, _, _= get_model_output(m, df_train_parlay, 'class', out_parlay, run_params, i, min_samples)
-    # save_output_dict(out_parlay, model_output_path, 'parlay_class')
-
-    # run all models
-    model_list = [ 'bridge', 'huber', 'lgbm', 'ridge', 'svr', 'lasso', 'enet', 'xgb', 'knn', 'gbm', 'gbmh', 'rf']
-    for i, m in enumerate(model_list):
-        out_reg, _, _ = get_model_output(m, df_train, 'reg', out_reg, run_params, i, min_samples)
-    save_output_dict(out_reg, model_output_path, 'reg')
-
-    # run all models
-    model_list = [ 'bridge', 'huber', 'lgbm', 'ridge', 'svr', 'lasso', 'enet', 'xgb', 'knn', 'gbm', 'gbmh', 'rf']
-    for i, m in enumerate(model_list):
-        out_reg, _, _ = get_model_output(m, df_train_diff, 'reg', out_reg, run_params, i, min_samples)
-    save_output_dict(out_reg, model_output_path, 'diff')
-
-    # # run all other models
-    # model_list = ['gbm_q', 'lgbm_q', 'qr_q', 'knn_q', 'rf_q']
-    # for i, m in enumerate(model_list):
-    #     for alph in [0.1, 0.25, 0.75, 0.9]:
-    #         print('\n', 'Quantile:', alph, '\n-----------')
-    #         out_quant, _, _ = get_model_output(m, df_train, 'quantile', out_quant, run_params, i, alpha=alph)
-    # save_output_dict(out_quant, model_output_path, 'quant')
+    # # run all models in parallel
+    # results = Parallel(n_jobs=-1, verbose=verbosity)(
+    #                 delayed(get_model_output)
+    #                 (m, label, df, model_obj, run_params, i, min_samples, alpha, n_iter) \
+    #                     for m, label, df, model_obj, i, min_samples, alpha, n_iter in func_params
+    #                 )
+    
+    # # save output for all models
+    # out_dict = output_dict()
+    # out_dict = unpack_results(out_dict, func_params, results)
+    # save_output_dict(out_dict, 'all', model_output_path)
 
 #%%
 
-metric = 'steals'
+for m, label, df, model_obj, i, min_samples, alpha, n_iter in func_params[4:5]:
+
+    model_name = m
+    print(model_name)
+    cur_df = df.copy()
+
+
+    # best_models, oof_data, param_scores, trials = get_model_output(m, label, df, model_obj, run_params, i, min_samples, alpha, n_iter)
+    bayes_rand = run_params['opt_type']
+    proba = get_proba(model_obj)
+    trials = get_trials(label, model_name, bayes_rand)
+
+    skm, X, y = get_skm(cur_df, model_obj, to_drop=run_params['drop_cols'])
+    pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples, bayes_rand=bayes_rand)
+    if trials is not None: trials = update_trials_params(trials, model_name, params, pipe)
+
+    # fit and append the ADP model
+    start = time.time()
+    best_models, oof_data, param_scores, trials = skm.time_series_cv(pipe, X, y, params, n_iter=20, 
+                                                                     n_splits=run_params['n_splits'], col_split='game_date', 
+                                                                     time_split=run_params['cv_time_input'],
+                                                                     bayes_rand=bayes_rand, proba=proba, trials=trials,
+                                                                     random_seed=(i+7)*19+(i*12)+6, alpha=alpha)
+
+#%%
+
+show_calibration_curve(oof_data['full_hold'].y_act, oof_data['full_hold'].pred)
+
+#%%
+
+metric = 'rebounds'
 
 # load data and filter down
 pkey, model_output_path = create_pkey_output_path(metric, run_params, vers)
@@ -461,8 +662,17 @@ out_reg, out_quant, out_class, out_diff = output_dict(),  output_dict(), output_
 cur_df = df_train_class.copy()
 model_obj = 'class'
 model_name = 'test_class'
+out_dict={}
 alpha=None
 i=50
+
+skm, X, y = get_skm(cur_df, model_obj, to_drop=run_params['drop_cols'])
+pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples)
+
+if model_obj == 'class': proba = True
+else: proba = False
+
+print(f'\n{model_name}\n============\n')
 
 skm, X, y = get_skm(cur_df, model_obj, to_drop=run_params['drop_cols'])
 pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples)
@@ -473,12 +683,18 @@ else: proba = False
 # fit and append the ADP model
 import time
 start = time.time()
-best_models, oof_data, _ = skm.time_series_cv(pipe, X, y, params, n_iter=run_params['n_iters'], 
+best_models, oof_data, _, _ = skm.time_series_cv(pipe, X, y, params, n_iter=run_params['n_iters'], 
                                                 n_splits=run_params['n_splits'], col_split='game_date', 
-                                                bayes_rand='custom_rand', time_split=run_params['cv_time_input'],
+                                                bayes_rand='rand', time_split=run_params['cv_time_input'],
                                                 proba=proba, random_seed=(i+7)*19+(i*12)+6, alpha=alpha)
 
-pipeline = best_models[0]
+print('Time Elapsed:', np.round((time.time()-start)/60,1), 'Minutes')
+
+col_label = str(alpha)
+out_dict = update_output_dict(model_obj, model_name, col_label, out_dict, oof_data, best_models)
+
+#%%
+pipeline = best_models[1]
 pipeline.fit(X,y)
 
 # get the feature names from the original dataset

@@ -15,6 +15,7 @@ from skmodel import SciKitModel
 from hyperopt import Trials
 from wakepy import keep
 from joblib import Parallel, delayed
+import time
 
 import warnings
 warnings.filterwarnings("ignore", category=RuntimeWarning) 
@@ -44,12 +45,13 @@ run_params = {
     'cv_time_input': '2023-02-20',
     'train_time_split': '2023-03-14',
     'metrics': [
-                'points', 'assists', 'rebounds', 'three_pointers',   
-                'steals_blocks', 'blocks', 'steals', 
+                # 'points', 'assists', 'rebounds', 'three_pointers',   
+                # 'steals_blocks', 'blocks',
+                  'steals', 
              #   'total_points', 'spread'
-             #   'points_assists', 'points_rebounds', 'points_rebounds_assists', 'assists_rebounds'  
+               'points_assists', 'points_rebounds', 'points_rebounds_assists', 'assists_rebounds'  
                 ],
-    'n_iters': 2,
+    'n_iters': 25,
     'n_splits': 5,
     'parlay': False,
     'opt_type': 'bayes'
@@ -550,7 +552,7 @@ def show_calibration_curve(y_true, y_pred, n_bins=10):
 
 #%%
 
-for metric in run_params['metrics'][:1]:
+for metric in run_params['metrics']:
 
     print(f"\n==================\n{metric} {run_params['train_time_split']} {vers}\n====================")
 
@@ -570,7 +572,8 @@ for metric in run_params['metrics'][:1]:
     df['team'] = 0
 
     df_train, df_predict, output_start, min_samples = train_predict_split(df, run_params)
-
+    df_train['y_act'] = df_train.y_act + (np.random.random(size=len(df_train)) / 1000)
+    
     run_params['parlay'] = False
     df_train_class, df_predict_class = get_over_under_class(df, metric, run_params, model_obj='class')
     df_train_diff, df_predict_diff = get_over_under_class(df, metric, run_params, model_obj='reg')
@@ -589,23 +592,23 @@ for metric in run_params['metrics'][:1]:
         print('No Trials Exist')
 
     func_params = []
-    # func_params.extend(quant_params(df_train, [0.25, 0.75], min_samples,  num_trials, run_params))
+    func_params.extend(quant_params(df_train, [0.25, 0.75], min_samples,  num_trials, run_params))
     func_params.extend(reg_params(df_train, min_samples, num_trials, run_params))
-    # func_params.extend(class_params(df_train_class, min_samples, num_trials, run_params, is_parlay=False))
-    # func_params.extend(class_params(df_train_parlay, min_samples, num_trials, run_params, is_parlay=True))
-    # func_params = order_func_params(func_params, trial_times)
+    func_params.extend(class_params(df_train_class, min_samples, num_trials, run_params, is_parlay=False))
+    func_params.extend(class_params(df_train_parlay, min_samples, num_trials, run_params, is_parlay=True))
+    func_params = order_func_params(func_params, trial_times)
     
-    # # run all models in parallel
-    # results = Parallel(n_jobs=-1, verbose=verbosity)(
-    #                 delayed(get_model_output)
-    #                 (m, label, df, model_obj, run_params, i, min_samples, alpha, n_iter) \
-    #                     for m, label, df, model_obj, i, min_samples, alpha, n_iter in func_params
-    #                 )
+    # run all models in parallel
+    results = Parallel(n_jobs=-1, verbose=verbosity)(
+                    delayed(get_model_output)
+                    (m, label, df, model_obj, run_params, i, min_samples, alpha, n_iter) \
+                        for m, label, df, model_obj, i, min_samples, alpha, n_iter in func_params
+                    )
     
-    # # save output for all models
-    # out_dict = output_dict()
-    # out_dict = unpack_results(out_dict, func_params, results)
-    # save_output_dict(out_dict, 'all', model_output_path)
+    # save output for all models
+    out_dict = output_dict()
+    out_dict = unpack_results(out_dict, func_params, results)
+    save_output_dict(out_dict, 'all', model_output_path)
 
 #%%
 

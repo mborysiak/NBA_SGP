@@ -43,15 +43,15 @@ run_params = {
     
     # set year and week to analyze
     'cv_time_input': '2023-02-20',
-    'train_time_split': '2023-03-14',
+    'train_time_split': '2023-03-21',
     'metrics': [
-                # 'points', 'assists', 'rebounds', 'three_pointers',   
-                # 'steals_blocks', 'blocks',
-                  'steals', 
-             #   'total_points', 'spread'
-               'points_assists', 'points_rebounds', 'points_rebounds_assists', 'assists_rebounds'  
+                'points', 'assists', 'rebounds', 'three_pointers',   
+                'steals_blocks', 'blocks', 'steals', 
+                'points_assists', 'points_rebounds',
+                'points_rebounds_assists', 'assists_rebounds',
+                # 'total_points', 'spread'  
                 ],
-    'n_iters': 25,
+    'n_iters': 20,
     'n_splits': 5,
     'parlay': False,
     'opt_type': 'bayes'
@@ -573,7 +573,7 @@ for metric in run_params['metrics']:
 
     df_train, df_predict, output_start, min_samples = train_predict_split(df, run_params)
     df_train['y_act'] = df_train.y_act + (np.random.random(size=len(df_train)) / 1000)
-    
+
     run_params['parlay'] = False
     df_train_class, df_predict_class = get_over_under_class(df, metric, run_params, model_obj='class')
     df_train_diff, df_predict_diff = get_over_under_class(df, metric, run_params, model_obj='reg')
@@ -612,14 +612,14 @@ for metric in run_params['metrics']:
 
 #%%
 
-for m, label, df, model_obj, i, min_samples, alpha, n_iter in func_params[4:5]:
+for m, label, df, model_obj, i, min_samples, alpha, n_iter in func_params[:1]:
 
     model_name = m
     print(model_name)
     cur_df = df.copy()
 
 
-    # best_models, oof_data, param_scores, trials = get_model_output(m, label, df, model_obj, run_params, i, min_samples, alpha, n_iter)
+    best_models, oof_data, param_scores, trials = get_model_output(m, label, df, model_obj, run_params, i, min_samples, alpha, n_iter)
     bayes_rand = run_params['opt_type']
     proba = get_proba(model_obj)
     trials = get_trials(label, model_name, bayes_rand)

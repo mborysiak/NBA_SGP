@@ -119,7 +119,7 @@ class DKScraper():
         offer_cats = {}
         cat_json = self.base_api['eventGroup']['offerCategories']
 
-        keep_cats = ['Player Points', 'Player Rebounds', 'Player Assists', 'Player Threes', 'Player Combos', 'Player Blocks/Steals']
+        keep_cats = ['Player Points', 'Player Rebounds', 'Player Assists', 'Player Threes', 'Player Combos', 'Player Blocks/Steals', 'Player Defense']
         for i in range(1,len(cat_json)):
             if cat_json[i]['name'] in keep_cats:
                 offer_cats[cat_json[i]['name']] = cat_json[i]['offerCategoryId']
@@ -229,6 +229,7 @@ props_df.player = props_df.player.apply(dc.name_clean)
 
 props_df.head(10)
 
+#%%
 games_df = nba_scrape.nba_games_dk()
 games_df['game_date'] = dt.datetime.now().date()
 games_df.head(5)
@@ -283,7 +284,7 @@ today_month = dt.datetime.now().month
 today_day = str(dt.datetime.now().day).zfill(2)
 fname = f'FantasyPros_NBA_Daily_Fantasy_Basketball_Projections_({today_month}_{today_day})_.csv'
 
-try: os.replace(f"/Users/mborysia/Downloads/{fname}", 
+try: os.replace(f"/Users/borys/Downloads/{fname}", 
                 f'{root_path}/Data/OtherData/Fantasy_Pros/{fname}')
 except: pass
 
@@ -305,7 +306,7 @@ fname = 'fantasy-basketball-projections.csv'
 today_date = dt.datetime.now().date()
 # today_date = dt.date(2023, 3, 30)
 date_str = today_date.strftime('%Y%m%d')
-try: os.replace(f"/Users/mborysia/Downloads/{fname}", 
+try: os.replace(f"/Users/borys/Downloads/{fname}", 
                 f"{root_path}/Data/OtherData/FantasyData/{date_str}_{fname}")
 except: pass
 
@@ -448,7 +449,7 @@ nba_stats = NBAStats()
 
 #%%
 import time
-yesterday_date = dt.datetime(2023, 4, 6).date()
+yesterday_date = dt.datetime(2023, 10, 25).date()
 
 box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score', yesterday_date)
 time.sleep(5)

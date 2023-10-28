@@ -42,13 +42,14 @@ verbosity=50
 run_params = {
     
     # set year and week to analyze
-    'cv_time_input': '2023-02-20',
-    'train_time_split': '2023-03-21',
+    'cv_time_input': '2023-02-28',
+    'train_time_split': '2023-03-28',
     'metrics': [
-                'points', 'assists', 'rebounds', 'three_pointers',   
-                'steals_blocks', 'blocks', 'steals', 
+                'points', 'assists',
+                'rebounds', 'three_pointers',   
                 'points_assists', 'points_rebounds',
                 'points_rebounds_assists', 'assists_rebounds',
+                'steals_blocks',# 'blocks', 'steals', 
                 # 'total_points', 'spread'  
                 ],
     'n_iters': 20,
@@ -256,9 +257,9 @@ def get_trial_times(root_path, run_params):
 def calc_num_trials(time_per_trial, run_params):
 
     n_iters = run_params['n_iters']
-    time_per_trial['percentile_90_time'] = time_per_trial.time_per_trial.quantile(0.8)
+    time_per_trial['percentile_90_time'] = time_per_trial.time_per_trial.quantile(0.5)
     time_per_trial['num_trials'] = n_iters * time_per_trial.percentile_90_time / time_per_trial.time_per_trial
-    time_per_trial['num_trials'] = time_per_trial.num_trials.apply(lambda x: np.min([n_iters, np.max([x, n_iters/4])])).astype('int')
+    time_per_trial['num_trials'] = time_per_trial.num_trials.apply(lambda x: np.min([n_iters, np.max([x, 1])])).astype('int')
     
     return {k:v for k,v in zip(time_per_trial.model, time_per_trial.num_trials)}
 
@@ -608,41 +609,40 @@ for metric in run_params['metrics']:
     # save output for all models
     out_dict = output_dict()
     out_dict = unpack_results(out_dict, func_params, results)
-    save_output_dict(out_dict, 'all', model_output_path)
+    # save_output_dict(out_dict, 'all', model_output_path)
 
 #%%
 
-for m, label, df, model_obj, i, min_samples, alpha, n_iter in func_params[:1]:
+for m, label, df, model_obj, i, min_samples, alpha, n_iter in func_params[:3]:
 
     model_name = m
     print(model_name)
     cur_df = df.copy()
 
-
     best_models, oof_data, param_scores, trials = get_model_output(m, label, df, model_obj, run_params, i, min_samples, alpha, n_iter)
-    bayes_rand = run_params['opt_type']
-    proba = get_proba(model_obj)
-    trials = get_trials(label, model_name, bayes_rand)
+    # bayes_rand = run_params['opt_type']
+    # proba = get_proba(model_obj)
+    # trials = get_trials(label, model_name, bayes_rand)
 
-    skm, X, y = get_skm(cur_df, model_obj, to_drop=run_params['drop_cols'])
-    pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples, bayes_rand=bayes_rand)
-    if trials is not None: trials = update_trials_params(trials, model_name, params, pipe)
+    # skm, X, y = get_skm(cur_df, model_obj, to_drop=run_params['drop_cols'])
+    # pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples, bayes_rand=bayes_rand)
+    # if trials is not None: trials = update_trials_params(trials, model_name, params, pipe)
 
-    # fit and append the ADP model
-    start = time.time()
-    best_models, oof_data, param_scores, trials = skm.time_series_cv(pipe, X, y, params, n_iter=20, 
-                                                                     n_splits=run_params['n_splits'], col_split='game_date', 
-                                                                     time_split=run_params['cv_time_input'],
-                                                                     bayes_rand=bayes_rand, proba=proba, trials=trials,
-                                                                     random_seed=(i+7)*19+(i*12)+6, alpha=alpha)
-
-#%%
-
-show_calibration_curve(oof_data['full_hold'].y_act, oof_data['full_hold'].pred)
+    # # fit and append the ADP model
+    # start = time.time()
+    # best_models, oof_data, param_scores, trials = skm.time_series_cv(pipe, X, y, params, n_iter=20, 
+    #                                                                  n_splits=run_params['n_splits'], col_split='game_date', 
+    #                                                                  time_split=run_params['cv_time_input'],
+    #                                                                  bayes_rand=bayes_rand, proba=proba, trials=trials,
+    #                                                                  random_seed=(i+7)*19+(i*12)+6, alpha=alpha)
 
 #%%
 
-metric = 'rebounds'
+scores = load_pickle(model_output_path, 'all_param_scores')
+scores['reg_gbm'].sort_values(by='score').head(20)
+#%%
+
+metric = 'points'
 
 # load data and filter down
 pkey, model_output_path = create_pkey_output_path(metric, run_params, vers)
@@ -663,8 +663,8 @@ df_train_diff, df_predict_diff = get_over_under_class(df, metric, run_params, mo
 out_reg, out_quant, out_class, out_diff = output_dict(),  output_dict(), output_dict(), output_dict()
 
 cur_df = df_train_class.copy()
-model_obj = 'class'
-model_name = 'test_class'
+model_obj = 'reg'
+model_name = 'gbm'
 out_dict={}
 alpha=None
 i=50

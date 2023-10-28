@@ -817,6 +817,54 @@ def load_run_models(run_params, X_stack, y_stack, X_predict, model_obj, alpha=No
 
     return best_val, best_predictions
 
+
+# for backfilling events
+def create_metric_split_columns_backfill(df, metric_split):
+    if len(metric_split)==2:
+        ms1 = metric_split[0]
+        ms2 = metric_split[1]
+
+        for c in df.columns:
+            if ms1 in c:
+                try: df[f'{c}_{ms2}'] = df[c] + df[c.replace(ms1, ms2)]
+                except: pass
+
+    elif len(metric_split)==3:
+        ms1 = metric_split[0]
+        ms2 = metric_split[1]
+        ms3 = metric_split[2]
+
+        for c in df.columns:
+            if ms1 in c:
+                try: df[f'{c}_{ms2}_{ms3}'] = df[c] + df[c.replace(ms1, ms2)] + df[c.replace(ms1, ms3)]
+                except: pass
+
+    return df
+
+
+def create_y_act_backfill(df, metric):
+
+    if metric in ('points_assists', 'points_rebounds', 'points_rebounds_assists', 'steals_blocks', 'assists_rebounds'):
+        metric_split = metric.split('_')
+        df[f'y_act_{metric}'] = df[['y_act_' + c for c in metric_split]].sum(axis=1)
+        df = create_metric_split_columns_backfill(df, metric_split)
+
+    return df
+
+def get_all_past_results(run_params):
+
+    attach_pts, run_params = load_data(run_params)
+    for metric in ['points_assists', 'points_rebounds', 'points_rebounds_assists', 'steals_blocks', 'assists_rebounds']:
+        attach_pts = create_y_act_backfill(attach_pts, metric)
+
+    attach_cols = ['player', 'game_date']
+    attach_cols.extend([c for c in attach_pts.columns if 'y_act' in c])
+    attach_pts = attach_pts[attach_cols]
+    attach_pts.columns = [c.replace('y_act_', '') for c in attach_pts.columns]
+    attach_pts = pd.melt(attach_pts, id_vars=['player', 'game_date'], var_name=['metric'], value_name='y_act_fill')
+    attach_pts = attach_pts[attach_pts.metric!='points_assists_rebounds']
+    return attach_pts
+
 #%%
 #==========
 # General Setting
@@ -837,8 +885,7 @@ run_params = {
                  'points','assists', 'rebounds', 'three_pointers',   
                  'points_assists', 'points_rebounds',
                  'points_rebounds_assists', 'assists_rebounds',
-                 'steals_blocks', 
-                # 'steals', #'blocks', 
+                 'steals_blocks', 'steals', #'blocks', 
                
                 ],
 
@@ -899,15 +946,17 @@ teams.year = teams.year.apply(lambda x: int(x.replace('-', '')))
 # %%
 
 for te_date, tr_date in [
-                            # ['2023-03-15', '2023-03-14'],
-                            # ['2023-03-16', '2023-03-14'],
-                            # ['2023-03-17', '2023-03-14'],
-                            # ['2023-03-18', '2023-03-14'],
-                            # ['2023-03-19', '2023-03-14'],
-                            # ['2023-03-20', '2023-03-14'],
-                            ['2023-10-26', '2023-03-14'],
-                            ['2023-10-24', '2023-03-14'],
-                            ['2023-10-25', '2023-03-14'],
+                            # ['2023-03-21', '2023-03-14'],
+                            # ['2023-03-22', '2023-03-14'],
+                            # ['2023-03-23', '2023-03-14'],
+                            # ['2023-03-24', '2023-03-14'],
+                            # ['2023-03-25', '2023-03-14'],
+                            # ['2023-03-26', '2023-03-14'],
+                            # ['2023-03-27', '2023-03-14'],
+                            # ['2023-10-24', '2023-03-14'],
+                            # ['2023-10-25', '2023-03-14'],
+                            # ['2023-10-26', '2023-03-14'],
+                            ['2023-10-27', '2023-03-14'],
 ]:
     
     run_params['train_date'] = int(tr_date.replace('-', ''))
@@ -999,12 +1048,55 @@ for te_date, tr_date in [
 
 #%%
 
+past_pred = dm.read('''SELECT * 
+                        FROM Over_Probability_New 
+                        ''', 'Simulation')
+attach_pts = get_all_past_results(run_params)
 
-all_choices = {}
-for start_spot in range(10):
-    all_choices[start_spot] = {}
-    for num_choices in [1,2,3,4,5]:
-        all_choices[start_spot][num_choices] = []
+print(past_pred.shape[0])
+past_pred = pd.merge(past_pred, attach_pts, on=['player', 'game_date', 'metric'])
+print(past_pred.shape[0])
+past_pred['y_act_prob_fill'] = np.where(past_pred.y_act_fill > past_pred.value, 1, 0)
+
+missing_idx = past_pred.loc[past_pred.y_act.isnull()].index
+for met in ['y_act', 'y_act_prob']:
+    past_pred.loc[past_pred.index.isin(missing_idx), met] =  past_pred.loc[past_pred.index.isin(missing_idx), f'{met}_fill']
+past_pred = past_pred.drop(['y_act_fill', 'y_act_prob_fill'], axis=1)
+past_pred = past_pred.sort_values(by='game_date').reset_index(drop=True)
+
+past_pred[past_pred.game_date==20231026]
+dm.write_to_db(past_pred,'Simulation', 'Over_Probability_New', 'replace', create_backup=True)
+
+#%%
+
+import copy
+
+def get_choices_dict():
+
+    all_choices = {}
+    for start_spot in range(10):
+        all_choices[start_spot] = {}
+        for num_choices in [1,2,3,4,5,6]:
+            all_choices[start_spot][num_choices] = []
+    return all_choices
+
+def fill_choices_dict(all_choices, preds):
+    for start_spot in range(10):
+        for num_choices in [1,2,3,4,5,6]:
+            if preds.iloc[start_spot:start_spot+num_choices].shape[0] >= num_choices:
+                wins = preds.iloc[start_spot:start_spot+num_choices].y_act.sum()
+                odds = np.prod(preds.iloc[start_spot:start_spot+num_choices].decimal_odds)
+                if wins == num_choices:
+                    all_choices[start_spot][num_choices].append(odds)
+                else:
+                    all_choices[start_spot][num_choices].append(-1)
+    return all_choices
+
+def aggregate_choices(all_choices):
+    for k,v in all_choices.items():
+        for k2, v2 in v.items():
+            all_choices[k][k2] = np.sum(v2)
+    return pd.DataFrame(all_choices)
 
 
 i=20
@@ -1012,27 +1104,43 @@ model_obj = 'class'
 alpha=None
 run_params['cur_metric'] = 'points'
 
-for test_date in [20230316, 20230317, 20230318, 20230319, 20230320, 20231024, 20231025]:
+final_ens_choices = get_choices_dict()
+orig_choices = get_choices_dict()
 
-    train_pred = dm.read("SELECT * FROM Over_Probability_New WHERE value > 1.5 AND decimal_odds > 1.6", 'Simulation')
+game_dates = dm.read('''SELECT DISTINCT game_date 
+                        FROM Over_Probability_New 
+                        WHERE value > 2.5 
+                              AND decimal_odds > 1.5
+                              AND game_date > 20230315
+                              AND metric NOT IN ('steals', 'blocks', 'steal_blocks')
+                        ORDER BY game_date ASC''', 'Simulation').game_date.values
+
+for test_date in game_dates:
+
+    train_pred = dm.read('''SELECT * 
+                            FROM Over_Probability_New 
+                            WHERE value > 2.5 
+                                  AND decimal_odds > 1.7
+                            ''', 'Simulation')
     train_pred = train_pred.drop('y_act', axis=1).rename(columns={'y_act_prob': 'y_act'})
 
     test_pred = train_pred[train_pred.game_date == test_date]
     train_pred = train_pred[train_pred.game_date < test_date].sample(frac=1, random_state=i).reset_index(drop=True)
 
     X_train = train_pred[['decimal_odds', 'value', 'prob_over', 'pred_mean', 'pred_q25', 'pred_q50', 'pred_q75']].copy()
-    X_train.loc[X_train.decimal_odds > 2, 'decimal_odds'] = 2-(1/X_train.loc[X_train.decimal_odds > 2, 'decimal_odds'])
+    # X_train.loc[X_train.decimal_odds > 2, 'decimal_odds'] = 2-(1/X_train.loc[X_train.decimal_odds > 2, 'decimal_odds'])
     X_train = create_value_compare_col(X_train)
     X_train = pd.concat([X_train, pd.get_dummies(train_pred.metric)], axis=1)
 
     X_test = test_pred[['decimal_odds', 'value', 'prob_over', 'pred_mean', 'pred_q25', 'pred_q50', 'pred_q75']].copy()
-    X_test.loc[X_test.decimal_odds > 2, 'decimal_odds'] = 2-(1/X_test.loc[X_test.decimal_odds > 2, 'decimal_odds'])
+    # X_test.loc[X_test.decimal_odds > 2, 'decimal_odds'] = 2-(1/X_test.loc[X_test.decimal_odds > 2, 'decimal_odds'])
     X_test = create_value_compare_col(X_test)
     X_test = pd.concat([X_test, pd.get_dummies(test_pred.metric)], axis=1)
 
     y_train = train_pred.y_act
 
-    best_model, stack_scores, stack_pred, trial = run_stack_models('test', 'lr_c', i, model_obj, alpha, X_train, y_train, run_params, 50, False, wt_col='decimal_odds')
+    best_model, stack_scores, stack_pred, trial = run_stack_models('test', 'lr_c', i, model_obj, alpha, 
+                                                                   X_train, y_train, run_params, 50, False, wt_col='decimal_odds')
     show_calibration_curve( stack_pred['y'],stack_pred['stack_pred'])
 
     for c in X_train.columns:
@@ -1044,26 +1152,21 @@ for test_date in [20230316, 20230317, 20230318, 20230319, 20230320, 20231024, 20
     best_model.fit(X_train, y_train)
     preds = pd.Series(best_model.predict_proba(X_test)[:,1], name='final_pred')
     preds = pd.concat([preds, test_pred.reset_index(drop=True)], axis=1)
-    player_max_pred = preds.groupby('team').agg({'final_pred': 'max'}).reset_index()
-    preds = pd.merge(preds, player_max_pred, on=['team', 'final_pred'])
 
-    preds.sort_values(by='final_pred', ascending=False).iloc[:50]
+    player_max_pred = preds.groupby('player').agg({'final_pred': 'max'}).reset_index()
+    preds = pd.merge(preds, player_max_pred, on=['player', 'final_pred'])
+    preds = preds.sort_values(by='final_pred', ascending=False).reset_index(drop=True)
 
-    for start_spot in range(10):
-        for num_choices in [1,2,3,4,5]:
-            if preds.iloc[start_spot:start_spot+num_choices].shape[0] >= num_choices:
-                wins = preds.iloc[start_spot:start_spot+num_choices].y_act.sum()
-                odds = np.prod(preds.iloc[start_spot:start_spot+num_choices].decimal_odds)-1
-                if wins == num_choices:
-                    all_choices[start_spot][num_choices].append(odds)
-                else:
-                    all_choices[start_spot][num_choices].append(-1)
+    player_max_pred_orig = test_pred.groupby('player').agg({'prob_over': 'max'}).reset_index()
+    preds_orig = pd.merge(test_pred, player_max_pred_orig, on=['player', 'prob_over'])
+    preds_orig = preds_orig.sort_values(by='prob_over', ascending=False).reset_index(drop=True)
 
-for k,v in all_choices.items():
-    for k2, v2 in v.items():
-        all_choices[k][k2] = np.sum(v2)
+    final_ens_choices = fill_choices_dict(final_ens_choices, preds)
+    orig_choices = fill_choices_dict(orig_choices, preds_orig)
 
-pd.DataFrame(all_choices)
+    
+display(aggregate_choices(copy.deepcopy(final_ens_choices)))
+display(aggregate_choices(copy.deepcopy(orig_choices)))
 
 #%%
 
@@ -1078,27 +1181,31 @@ model_obj = 'class'
 alpha=None
 run_params['cur_metric'] = 'points'
 
-test_date = '20231026'
-train_pred = dm.read("SELECT * FROM Over_Probability_New WHERE value > 1.5 AND decimal_odds > 1.6", 'Simulation')
+test_date = 20231027
+train_pred = dm.read('''SELECT * 
+                            FROM Over_Probability_New 
+                            WHERE value > 2.5 
+                                  AND decimal_odds > 1.7
+                            ''', 'Simulation')
+                        
 train_pred = train_pred.drop('y_act', axis=1).rename(columns={'y_act_prob': 'y_act'})
-
 test_pred = train_pred[train_pred.game_date == test_date]
 train_pred = train_pred[train_pred.game_date < test_date].sample(frac=1, random_state=i).reset_index(drop=True)
 
 X_train = train_pred[['decimal_odds', 'value', 'prob_over', 'pred_mean', 'pred_q25', 'pred_q50', 'pred_q75']].copy()
-X_train.loc[X_train.decimal_odds > 2, 'decimal_odds'] = 2-(1/X_train.loc[X_train.decimal_odds > 2, 'decimal_odds'])
+# X_train.loc[X_train.decimal_odds > 2, 'decimal_odds'] = 2-(1/X_train.loc[X_train.decimal_odds > 2, 'decimal_odds'])
 X_train = create_value_compare_col(X_train)
 X_train = pd.concat([X_train, pd.get_dummies(train_pred.metric)], axis=1)
 
 X_test = test_pred[['decimal_odds', 'value', 'prob_over', 'pred_mean', 'pred_q25', 'pred_q50', 'pred_q75']].copy()
-X_test.loc[X_test.decimal_odds > 2, 'decimal_odds'] = 2-(1/X_test.loc[X_test.decimal_odds > 2, 'decimal_odds'])
+# X_test.loc[X_test.decimal_odds > 2, 'decimal_odds'] = 2-(1/X_test.loc[X_test.decimal_odds > 2, 'decimal_odds'])
 X_test = create_value_compare_col(X_test)
 X_test = pd.concat([X_test, pd.get_dummies(test_pred.metric)], axis=1)
 
 y_train = train_pred.y_act
 
 best_model, stack_scores, stack_pred, trial = run_stack_models('test', 'lr_c', i, model_obj, alpha, X_train, y_train, run_params, 100, False, wt_col='decimal_odds')
-show_calibration_curve( stack_pred['y'],stack_pred['stack_pred'])
+show_calibration_curve(stack_pred['y'],stack_pred['stack_pred'])
 
 for c in X_train.columns:
     if c not in X_test.columns:
@@ -1109,9 +1216,15 @@ X_test = X_test[X_train.columns]
 best_model.fit(X_train, y_train)
 preds = pd.Series(best_model.predict_proba(X_test)[:,1], name='final_pred')
 preds = pd.concat([preds, test_pred.reset_index(drop=True)], axis=1)
-player_max_pred = preds.groupby('team').agg({'final_pred': 'max'}).reset_index()
-preds = pd.merge(preds, player_max_pred, on=['team', 'final_pred'])
-
 preds.sort_values(by='final_pred', ascending=False).iloc[:50]
 
+
+# %%
+
+start_spot = 5
+num_choices = 3
+
+player_max_pred = preds.groupby('player').agg({'final_pred': 'max'}).reset_index()
+preds_top = pd.merge(preds, player_max_pred, on=['player', 'final_pred'])
+preds_top.sort_values(by='final_pred', ascending=False).iloc[start_spot:start_spot+num_choices]
 # %%

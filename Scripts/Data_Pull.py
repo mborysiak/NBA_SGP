@@ -227,12 +227,12 @@ props_df = nba_scrape.dict_to_df(props)
 props_df['game_date'] = dt.datetime.now().date()
 props_df.player = props_df.player.apply(dc.name_clean)
 
-props_df.head(10)
+props_df.head(25)
 
 #%%
 games_df = nba_scrape.nba_games_dk()
 games_df['game_date'] = dt.datetime.now().date()
-games_df.head(5)
+games_df.head(16)
 
 # %%
 dm.delete_from_db('Player_Stats', 'Draftkings_Odds', f"game_date='{dt.datetime.now().date()}'", create_backup=False)
@@ -449,7 +449,7 @@ nba_stats = NBAStats()
 
 #%%
 import time
-yesterday_date = dt.datetime(2023, 10, 25).date()
+yesterday_date = dt.datetime(2023, 10, 26).date()
 
 box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score', yesterday_date)
 time.sleep(5)

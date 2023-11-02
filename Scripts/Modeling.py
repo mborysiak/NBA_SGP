@@ -12,7 +12,8 @@ from ff.db_operations import DataManage
 from ff import general as ffgeneral
 from skmodel import SciKitModel
 
-from hyperopt import Trials
+from hyperopt.pyll import scope
+from hyperopt import Trials, hp
 from wakepy import keep
 from joblib import Parallel, delayed
 import time
@@ -42,14 +43,13 @@ verbosity=50
 run_params = {
     
     # set year and week to analyze
-    'cv_time_input': '2023-02-28',
-    'train_time_split': '2023-03-28',
+    'cv_time_input': '2023-03-07',
+    'train_time_split': '2023-10-30',
     'metrics': [
-                'points', 'assists',
-                'rebounds', 'three_pointers',   
-                'points_assists', 'points_rebounds',
+                # 'points', 'assists', 'rebounds',
+                'three_pointers','points_assists', 'points_rebounds',
                 'points_rebounds_assists', 'assists_rebounds',
-                'steals_blocks',# 'blocks', 'steals', 
+                'steals_blocks', 'blocks', 'steals', 
                 # 'total_points', 'spread'  
                 ],
     'n_iters': 20,
@@ -257,9 +257,9 @@ def get_trial_times(root_path, run_params):
 def calc_num_trials(time_per_trial, run_params):
 
     n_iters = run_params['n_iters']
-    time_per_trial['percentile_90_time'] = time_per_trial.time_per_trial.quantile(0.5)
+    time_per_trial['percentile_90_time'] = time_per_trial.time_per_trial.quantile(0.4)
     time_per_trial['num_trials'] = n_iters * time_per_trial.percentile_90_time / time_per_trial.time_per_trial
-    time_per_trial['num_trials'] = time_per_trial.num_trials.apply(lambda x: np.min([n_iters, np.max([x, 1])])).astype('int')
+    time_per_trial['num_trials'] = time_per_trial.num_trials.apply(lambda x: np.min([n_iters, np.max([x, 2])])).astype('int')
     
     return {k:v for k,v in zip(time_per_trial.model, time_per_trial.num_trials)}
 
@@ -386,6 +386,12 @@ def get_full_pipe(skm, m, alpha=None, stack_model=False, min_samples=10, bayes_r
                                             [ 'ProjPts', 'dk_salary','projected_points', 'fantasyPoints', 'ffa_points', 'avg_proj_points', 'fc_proj_fantasy_pts_fc', 'log_fp_rank', 'log_avg_proj_rank']
                                         ]
         params['k_best__k'] = range(1, 14)
+
+    if m in ('gbm', 'gbm_c', 'gbm_q'):
+        params[f'{m}__n_estimators'] = scope.int(hp.quniform('n_estimators', 20, 60, 2))
+        params[f'{m}__max_depth'] = scope.int(hp.quniform('max_depth', 2, 15, 2))
+        params[f'{m}__max_features'] = hp.uniform('max_features', 0.6, 0.9)
+        params[f'{m}__subsample'] = hp.uniform('subsample', 0.6, 0.9)
     
     return pipe, params
 
@@ -609,11 +615,11 @@ for metric in run_params['metrics']:
     # save output for all models
     out_dict = output_dict()
     out_dict = unpack_results(out_dict, func_params, results)
-    # save_output_dict(out_dict, 'all', model_output_path)
+    save_output_dict(out_dict, 'all', model_output_path)
 
 #%%
 
-for m, label, df, model_obj, i, min_samples, alpha, n_iter in func_params[:3]:
+for m, label, df, model_obj, i, min_samples, alpha, n_iter in func_params[1:2]:
 
     model_name = m
     print(model_name)

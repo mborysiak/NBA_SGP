@@ -883,16 +883,16 @@ def save_individual_stats(individual_cats, metric, X_stack, X_stack_class, X_pre
 run_params = {
     
     # set year and week to analyze
-    'last_train_date_orig': '2023-03-28',
-    'train_date_orig': '2023-10-30',
-    'test_time_split_orig': '2023-11-08',
+    'last_train_date_orig': '2023-10-30',
+    'train_date_orig': '2023-11-11',
+    'test_time_split_orig': '2023-11-17',
 
     'metrics':  [
                  'points','assists', 'rebounds', 'three_pointers',   
                  'points_assists', 'points_rebounds',
                  'points_rebounds_assists', 'assists_rebounds',
                  'steals_blocks', 
-                 'blocks', 'steals',
+              #   'blocks', 'steals',
                
                 ],
 
@@ -1111,9 +1111,7 @@ for met in ['y_act', 'y_act_prob']:
 past_pred = past_pred.drop(['y_act_fill', 'y_act_prob_fill'], axis=1)
 past_pred = past_pred.sort_values(by='game_date').reset_index(drop=True)
 
-past_pred[past_pred.game_date==20231106].sort_values(by='prob_over', ascending=False)
-
-#%%
+past_pred[past_pred.game_date==20231109].sort_values(by='prob_over', ascending=False)
 dm.write_to_db(past_pred,'Simulation', 'Over_Probability_New', 'replace', create_backup=True)
 
 #%%
@@ -1402,11 +1400,11 @@ val_less_list = ['<100', '<50', '<40', '<30', '<20']
 iter_cats = list(set(itertools.product(wt_col_list, decimal_cut_greater_list, decimal_cut_less_list, include_under_list,
                                        val_greater_list, val_less_list)))
 
-out = Parallel(n_jobs=-1, verbose=50)(
-    delayed(run_past_choices)
-    (ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less) 
-    for wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less in iter_cats
-)
+# out = Parallel(n_jobs=-1, verbose=50)(
+#     delayed(run_past_choices)
+#     (ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less) 
+#     for wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less in iter_cats
+# )
 
 # for wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less in iter_cats[:1]:
 #     x, y , z = run_past_choices(ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less)               
@@ -1415,53 +1413,32 @@ out = Parallel(n_jobs=-1, verbose=50)(
 #%%
 
 i=20
-test_date = 20231108
-ens_vers = 'random_kbest_matt0_brier1_include2_kfold3'
+test_date = 20231117
+# ens_vers = 'random_kbest_matt0_brier1_include2_kfold3'
+# run_params['stack_model'] = 'random_kbest'
+# run_params['stack_model_class'] = 'random_kbest'
 
-# # top scoring for start=0 and num_choice 1 through 6, uses stack_model
-# decimal_cut_greater = '>=1.7'
-# decimal_cut_less = '<=3.0'
-# val_greater = '>3.5'
-# val_less = '<30'
-# wt_col = 'decimal_odds'
-# include_under = False
-# stack_model = True
+ens_vers = 'random_full_stack_matt0_brier1_include2_kfold3'
+run_params['stack_model'] = 'random_full_stack'
+run_params['stack_model_class'] = 'random_full_stack'
 
-# # top scoring for start=0 and num_choice 1 through 6, uses stack_model
-# decimal_cut_greater = '>=1.7'
-# decimal_cut_less = '<=2.3'
-# val_greater = '>0'
-# val_less = '<50'
-# wt_col = 'decimal_odds_twomax'
-# include_under = False
-# stack_model = True
-
-# top scoring for start=0 and num_choice 1 through 6, uses stack_model
-decimal_cut_greater = '>=1.7'
-decimal_cut_less = '<=2.3'
+# determined using iterative modeling starting from stack_model, include_under=1, start_spot<=1
+decimal_cut_greater = '>0'
+decimal_cut_less = '<=3'
 val_greater = '>4.5'
-val_less = '<20'
+val_less = '<100'
 wt_col = 'decimal_odds_twomax'
 include_under = True
 stack_model = True
 
-# # top scoring for start=0 and num_choice 1 through 6, uses stack_model
+# # determined using iterative modeling starting from stack_model, include_under=0, start_spot<=1
 # decimal_cut_greater = '>0'
-# decimal_cut_less = '<=2.3'
+# decimal_cut_less = '<=3'
 # val_greater = '>1.5'
-# val_less = '<20'
+# val_less = '<100'
 # wt_col = 'decimal_odds_twomax'
-# include_under = True
+# include_under = False
 # stack_model = True
-
-# # top scoring for start=0 and num-choices=3, uses original
-# decimal_cut_greater = '>0'
-# decimal_cut_less = '<=2.3'
-# val_greater = '>0.5'
-# val_less = '<30'
-# wt_col = 'decimal_odds'
-# include_under = True
-# stack_model = False
 
 q = f'''SELECT * 
         FROM Over_Probability_New 
@@ -1531,10 +1508,16 @@ else:
  #%%
 
 from sklearn.linear_model import ElasticNet
+from lightgbm import LGBMRegressor
+import shap
 
 choice_params = dm.read('''SELECT * 
                            FROM Over_Probability_Choices
-                           WHERE num_choices=6
+                           WHERE rank_order='stack_model'
+                                 AND include_under=0
+                                 AND start_spot <= 1
+                                 AND value_cut_greater='>1.5'
+                                 AND decimal_cut_greater='>0'
                            ''', 'Simulation')
 X = choice_params.drop('winnings', axis=1)
 for c in X.columns:
@@ -1542,9 +1525,24 @@ for c in X.columns:
 
 y = choice_params.winnings
 
-lr = ElasticNet(l1_ratio=0.1, alpha=0.001)
+lr = ElasticNet(l1_ratio=0.01, alpha=0.0001)
 lr.fit(X,y)
-
 pd.Series(lr.coef_, index=X.columns).sort_values(ascending=False)
 
+#%%
+from sklearn.model_selection import cross_val_score
+
+lgbm = LGBMRegressor(n_jobs=-1)
+lgbm.fit(X,y)
+
+scores = cross_val_score(lgbm, X, y, cv=5, scoring='neg_mean_squared_error')
+scores = np.sqrt(-np.mean(scores))
+print(scores)
+
+shap_values = shap.TreeExplainer(lgbm).shap_values(X)
+shap.summary_plot(shap_values, X, feature_names=X.columns, plot_size=(8,10), max_display=30, show=False)
+
+# %%
+
+X.dtypes
 # %%

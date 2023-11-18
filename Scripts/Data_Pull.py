@@ -304,7 +304,7 @@ dm.write_to_db(df, 'Player_Stats', 'FantasyPros', if_exist='append')
 fname = 'fantasy-basketball-projections.csv'
 
 today_date = dt.datetime.now().date()
-# today_date = dt.date(2023, 3, 30)
+# today_date = dt.date(2023, 11, 15)
 date_str = today_date.strftime('%Y%m%d')
 try: os.replace(f"/Users/borys/Downloads/{fname}", 
                 f"{root_path}/Data/OtherData/FantasyData/{date_str}_{fname}")
@@ -449,7 +449,7 @@ nba_stats = NBAStats()
 
 #%%
 import time
-yesterday_date = dt.datetime(2023, 11, 6).date()
+yesterday_date = dt.datetime(2023, 11, 16).date()
 
 box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score', yesterday_date)
 time.sleep(5)
@@ -480,5 +480,3 @@ team = dm.read("SELECT * FROM Draftkings_Odds", 'Team_stats')
 team = team.groupby('game_date').agg({'team': 'count'}).reset_index()
 
 pd.merge(df, team, on='game_date')
-
-# %%

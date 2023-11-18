@@ -43,13 +43,14 @@ verbosity=50
 run_params = {
     
     # set year and week to analyze
-    'cv_time_input': '2023-03-07',
-    'train_time_split': '2023-10-30',
+    'cv_time_input': '2023-03-20',
+    'train_time_split': '2023-11-11',
     'metrics': [
                 # 'points', 'assists', 'rebounds',
-                'three_pointers','points_assists', 'points_rebounds',
-                'points_rebounds_assists', 'assists_rebounds',
-                'steals_blocks', 'blocks', 'steals', 
+                # 'three_pointers','points_assists', 'points_rebounds',
+                # 'points_rebounds_assists', 'assists_rebounds',
+                # 'steals_blocks',
+                  'blocks', 'steals', 
                 # 'total_points', 'spread'  
                 ],
     'n_iters': 20,
@@ -245,13 +246,13 @@ def get_trial_times(root_path, run_params):
         if k!='reg_adp':
             max_trial = len(v.trials) - 1
             trial_times = []
-            for i in range(max_trial-100, max_trial):
+            for i in range(max_trial-25, max_trial):
                 trial_times.append(v.trials[i]['refresh_time'] - v.trials[i]['book_time'])
             trial_time = np.mean(trial_times).seconds
             times.append([k, np.round(trial_time / 60, 2)])
 
     time_per_trial = pd.DataFrame(times, columns=['model', 'time_per_trial']).sort_values(by='time_per_trial', ascending=False)
-    time_per_trial['total_time'] = time_per_trial.time_per_trial * 100
+    time_per_trial['total_time'] = time_per_trial.time_per_trial * 25
     return time_per_trial
 
 def calc_num_trials(time_per_trial, run_params):
@@ -259,7 +260,7 @@ def calc_num_trials(time_per_trial, run_params):
     n_iters = run_params['n_iters']
     time_per_trial['percentile_90_time'] = time_per_trial.time_per_trial.quantile(0.4)
     time_per_trial['num_trials'] = n_iters * time_per_trial.percentile_90_time / time_per_trial.time_per_trial
-    time_per_trial['num_trials'] = time_per_trial.num_trials.apply(lambda x: np.min([n_iters, np.max([x, 2])])).astype('int')
+    time_per_trial['num_trials'] = time_per_trial.num_trials.apply(lambda x: np.min([n_iters, np.max([x, 6])])).astype('int')
     
     return {k:v for k,v in zip(time_per_trial.model, time_per_trial.num_trials)}
 
@@ -388,10 +389,10 @@ def get_full_pipe(skm, m, alpha=None, stack_model=False, min_samples=10, bayes_r
         params['k_best__k'] = range(1, 14)
 
     if m in ('gbm', 'gbm_c', 'gbm_q'):
-        params[f'{m}__n_estimators'] = scope.int(hp.quniform('n_estimators', 20, 60, 2))
-        params[f'{m}__max_depth'] = scope.int(hp.quniform('max_depth', 2, 15, 2))
-        params[f'{m}__max_features'] = hp.uniform('max_features', 0.6, 0.9)
-        params[f'{m}__subsample'] = hp.uniform('subsample', 0.6, 0.9)
+        params[f'{m}__n_estimators'] = scope.int(hp.quniform('n_estimators', 20, 50, 2))
+        params[f'{m}__max_depth'] = scope.int(hp.quniform('max_depth', 2, 12, 2))
+        params[f'{m}__max_features'] = hp.uniform('max_features', 0.5, 0.85)
+        params[f'{m}__subsample'] = hp.uniform('subsample', 0.5, 0.85)
     
     return pipe, params
 

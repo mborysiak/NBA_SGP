@@ -700,6 +700,8 @@ def run_stack_models(fname, final_m, i, model_obj, alpha, X_stack, y_stack, run_
     
     return best_model, stack_scores, stack_pred, trial
 
+ 
+
 def get_func_params(model_obj, alpha):
 
     model_list = {
@@ -773,7 +775,12 @@ def load_run_models(run_params, X_stack, y_stack, X_predict, model_obj, alpha=No
 
     if run_params['cur_metric']=='blocks' and run_params['train_date']==20231030 and model_obj=='reg':
         num_trials['gbm'] = 20
-    
+
+    if (run_params['cur_metric']=='points_assists' and run_params['train_date']==20231111 
+        and model_obj=='quantile' and alpha==0.75 and run_params['stack_model']=='random_full_stack'):
+        func_params = [f for f in func_params if f[0]!='rf_q']
+        model_list = [m for m in model_list if m!='rf_q']
+
     print(num_trials)
     print(path, fname)
 
@@ -782,24 +789,14 @@ def load_run_models(run_params, X_stack, y_stack, X_predict, model_obj, alpha=No
     
     else:
         
-        if run_params['opt_type']=='bayes':
-            results = Parallel(n_jobs=-1, verbose=50)(
-                            delayed(run_stack_models)
-                            (fname, final_m, i, model_obj, alpha, X_stack, y_stack, run_params, num_trials, is_parlay) 
-                            for final_m, i, model_obj, alpha in func_params
-                            )
-            best_models, scores, stack_val_pred, trials = unpack_results(model_list, results)
-            save_stack_runs(path, fname, best_models, scores, stack_val_pred, trials)
+        results = Parallel(n_jobs=-1, verbose=50)(
+                        delayed(run_stack_models)
+                        (fname, final_m, i, model_obj, alpha, X_stack, y_stack, run_params, num_trials, is_parlay) 
+                        for final_m, i, model_obj, alpha in func_params
+                        )
+        best_models, scores, stack_val_pred, trials = unpack_results(model_list, results)
+        save_stack_runs(path, fname, best_models, scores, stack_val_pred, trials)
 
-        elif run_params['opt_type']=='rand':
-            best_models = []; scores = []; stack_val_pred = pd.DataFrame()
-            for final_m, i, model_obj, alpha in func_params:
-                best_model, stack_scores, stack_pred, trials = run_stack_models(fname, final_m, i, model_obj, alpha, X_stack, y_stack, run_params, num_trials, is_million)
-                best_models.append(best_model)
-                scores.append(stack_scores['stack_score'])
-                stack_val_pred = pd.concat([stack_val_pred, pd.Series(stack_pred['stack_pred'], name=final_m)], axis=1)
-            
-            save_stack_runs(path, fname, best_models, scores, stack_val_pred, trials)
 
     X_predict = X_predict[X_stack.columns]
     predictions = stack_predictions(X_predict, best_models, model_list, model_obj=model_obj)
@@ -885,14 +882,12 @@ run_params = {
     # set year and week to analyze
     'last_train_date_orig': '2023-10-30',
     'train_date_orig': '2023-11-11',
-    'test_time_split_orig': '2023-11-17',
+    'test_time_split_orig': '2023-11-21',
 
     'metrics':  [
-                 'points','assists', 'rebounds', 'three_pointers',   
-                 'points_assists', 'points_rebounds',
-                 'points_rebounds_assists', 'assists_rebounds',
-                 'steals_blocks', 
-              #   'blocks', 'steals',
+                 'points','assists', 'rebounds', 'three_pointers','points_assists', 
+                  'points_rebounds', 'points_rebounds_assists', 'assists_rebounds',
+                  'steals_blocks', 'blocks', 'steals',
                
                 ],
 
@@ -908,10 +903,10 @@ run_params = {
 
     # set version and iterations
     'pred_vers': 'mse1_brier1',
-    # 'stack_model': 'random_kbest',
-    # 'stack_model_class': 'random_kbest',
-    'stack_model': 'random_full_stack',
-    'stack_model_class': 'random_full_stack',
+    'stack_model': 'random_kbest',
+    'stack_model_class': 'random_kbest',
+    # 'stack_model': 'random_full_stack',
+    # 'stack_model_class': 'random_full_stack',
     'parlay': False,
 
 }
@@ -985,11 +980,19 @@ teams.year = teams.year.apply(lambda x: int(x.replace('-', '')))
 #                             # ['2023-10-30', '2023-03-28'],
 #                             # ['2023-10-31', '2023-03-28'],
 #                             # ['2023-11-01', '2023-10-30'],
-#                             ['2023-11-02', '2023-10-30'],
-#                             ['2023-11-03', '2023-10-30'],
-#                             ['2023-11-04', '2023-10-30'],
-#                             ['2023-11-05', '2023-10-30'],
-#                             ['2023-11-06', '2023-10-30'],
+#                             # ['2023-11-02', '2023-10-30'],
+#                             # ['2023-11-03', '2023-10-30'],
+#                             # ['2023-11-04', '2023-10-30'],
+#                             # ['2023-11-05', '2023-10-30'],
+#                             # ['2023-11-06', '2023-10-30'],
+#                             # ['2023-11-14', '2023-10-30'],
+#                             # ['2023-11-15', '2023-10-30'],
+#                             # ['2023-11-16', '2023-10-30'],
+#                             # ['2023-11-17', '2023-11-11'],
+#                             # ['2023-11-18', '2023-11-11'],
+#                             # ['2023-11-19', '2023-11-11'],
+#                             ['2023-11-20', '2023-11-11'],
+#                             ['2023-11-21', '2023-11-11'],
 #                             ]:
     
 #     run_params['train_date'] = int(tr_date.replace('-', ''))
@@ -1017,7 +1020,7 @@ for metric in run_params['metrics']:
 
     #------------
     # Run the Stacking Models and Generate Output
-    # #------------
+    #------------
 
     # get the training data for stacking and prediction data after stacking
     X_stack, X_stack_class, y_stack, y_stack_class, models_reg, models_class, models_quant = load_all_stack_pred(model_output_path)
@@ -1413,7 +1416,9 @@ iter_cats = list(set(itertools.product(wt_col_list, decimal_cut_greater_list, de
 #%%
 
 i=20
-test_date = 20231117
+test_date = run_params['test_time_split']
+# test_date = 20231117
+
 # ens_vers = 'random_kbest_matt0_brier1_include2_kfold3'
 # run_params['stack_model'] = 'random_kbest'
 # run_params['stack_model_class'] = 'random_kbest'
@@ -1422,23 +1427,23 @@ ens_vers = 'random_full_stack_matt0_brier1_include2_kfold3'
 run_params['stack_model'] = 'random_full_stack'
 run_params['stack_model_class'] = 'random_full_stack'
 
-# determined using iterative modeling starting from stack_model, include_under=1, start_spot<=1
-decimal_cut_greater = '>0'
-decimal_cut_less = '<=3'
-val_greater = '>4.5'
-val_less = '<100'
-wt_col = 'decimal_odds_twomax'
-include_under = True
-stack_model = True
-
-# # determined using iterative modeling starting from stack_model, include_under=0, start_spot<=1
+# # determined using iterative modeling starting from stack_model, include_under=1, start_spot<=1
 # decimal_cut_greater = '>0'
 # decimal_cut_less = '<=3'
-# val_greater = '>1.5'
+# val_greater = '>4.5'
 # val_less = '<100'
 # wt_col = 'decimal_odds_twomax'
-# include_under = False
+# include_under = True
 # stack_model = True
+
+# determined using iterative modeling starting from stack_model, include_under=0, start_spot<=1
+decimal_cut_greater = '>0'
+decimal_cut_less = '<=3'
+val_greater = '>1.5'
+val_less = '<100'
+wt_col = 'decimal_odds_twomax'
+include_under = False
+stack_model = True
 
 q = f'''SELECT * 
         FROM Over_Probability_New 
@@ -1542,7 +1547,97 @@ print(scores)
 shap_values = shap.TreeExplainer(lgbm).shap_values(X)
 shap.summary_plot(shap_values, X, feature_names=X.columns, plot_size=(8,10), max_display=30, show=False)
 
+#%%
+
+
+
+
 # %%
 
-X.dtypes
+# df = dm.read("SELECT * FROM Over_Probability_New", 'Simulation')
+# df = df[~((df.game_date==20231119) & (df.team.isin(['PHI', 'BKN'])))]
+
+# dm.write_to_db(df,'Simulation', 'Over_Probability_New', 'replace', create_backup=True)
+
+# #%%
+
+# df = dm.read("SELECT * FROM Over_Probability_New", 'Simulation')
+# df = df[~((df.game_date==20231117) & (df.train_date==20231030))]
+# df
+# dm.write_to_db(df,'Simulation', 'Over_Probability_New', 'replace', create_backup=True)
+
+#%%
+
+df = dm.read("SELECT * FROM DraftKings_Odds", 'Player_Stats')
+df = df[~((df.game_date==20231119) & (df.team.isin(['PHI', 'BKN'])))]
+
+dm.write_to_db(df,'Player_Stats', 'DraftKings_Odds', 'replace', create_backup=True)
+
+# %%
+
+is_parlay = False
+alpha=0.75
+model_obj = 'quantile'
+
+
+if is_parlay: model_obj_label = 'is_parlay'
+else: model_obj_label = model_obj
+
+if model_obj=='reg': ens_vers = run_params['reg_ens_vers']
+elif model_obj=='class': ens_vers = run_params['class_ens_vers']
+elif model_obj=='quantile': 
+    ens_vers = run_params['quant_ens_vers']
+    model_obj_label = f"{model_obj_label}_{alpha}"
+
+
+path = run_params['model_output_path']
+fname = f"{model_obj_label}_{run_params['cur_metric']}_{ens_vers}"    
+model_list, func_params = get_func_params(model_obj, alpha)
+
+try:
+    time_per_trial = get_trial_times(root_path, fname, run_params)
+    print(time_per_trial)
+    num_trials = calc_num_trials(time_per_trial, run_params)
+except: 
+    num_trials = {m: run_params['n_iters'] for m in model_list}
+
+if run_params['cur_metric']=='three_pointers' and run_params['train_date']==20230328 and alpha==0.5:
+    num_trials['gbm_q'] = 20
+
+if run_params['cur_metric']=='blocks' and run_params['train_date']==20231030 and model_obj=='reg':
+    num_trials['gbm'] = 20
+
+if run_params['cur_metric']=='points_assists' and run_params['train_date']==20231111 and model_obj=='quantile' and alpha==0.75:
+    func_params = [f for f in func_params if f[0]!='rf_q']
+    model_list = [m for m in model_list if m!='rf_q']
+    print('filter worked')
+
+print(model_list)
+
+print(num_trials)
+print(path, fname)
+
+if os.path.exists(f"{path}/{fname}.p"):
+    best_models, scores, stack_val_pred = load_stack_runs(path, fname)
+
+else:
+    
+    results = Parallel(n_jobs=-1, verbose=50)(
+                    delayed(run_stack_models)
+                    (fname, final_m, i, model_obj, alpha, X_stack, y_stack, run_params, num_trials, is_parlay) 
+                    for final_m, i, model_obj, alpha in func_params
+                    )
+    best_models, scores, stack_val_pred, trials = unpack_results(model_list, results)
+    save_stack_runs(path, fname, best_models, scores, stack_val_pred, trials)
+
+
+X_predict = X_predict[X_stack.columns]
+predictions = stack_predictions(X_predict, best_models, model_list, model_obj=model_obj)
+best_val, best_predictions, _ = average_stack_models(scores, model_list, y_stack, stack_val_pred, 
+                                                        predictions, model_obj=model_obj, 
+                                                        show_plot=run_params['show_plot'], 
+                                                        min_include=run_params['min_include'])
+
+#%%
+
 # %%

@@ -449,7 +449,7 @@ nba_stats = NBAStats()
 
 #%%
 import time
-yesterday_date = dt.datetime(2023, 11, 16).date()
+yesterday_date = dt.datetime(2023, 11, 20).date()
 
 box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score', yesterday_date)
 time.sleep(5)
@@ -480,3 +480,10 @@ team = dm.read("SELECT * FROM Draftkings_Odds", 'Team_stats')
 team = team.groupby('game_date').agg({'team': 'count'}).reset_index()
 
 pd.merge(df, team, on='game_date')
+
+#%%
+# import sqlite3
+# conn = sqlite3.connect('c:/Users/borys/Downloads/Team_Stats.sqlite3')
+# df = pd.read_sql_query("SELECT * FROM Draftkings_Odds", conn)
+# dm.write_to_db(df, 'Team_Stats', 'Draftkings_Odds', 'append')
+# %%

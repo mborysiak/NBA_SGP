@@ -260,7 +260,7 @@ def calc_num_trials(time_per_trial, run_params):
     n_iters = run_params['n_iters']
     time_per_trial['percentile_90_time'] = time_per_trial.time_per_trial.quantile(0.4)
     time_per_trial['num_trials'] = n_iters * time_per_trial.percentile_90_time / time_per_trial.time_per_trial
-    time_per_trial['num_trials'] = time_per_trial.num_trials.apply(lambda x: np.min([n_iters, np.max([x, 6])])).astype('int')
+    time_per_trial['num_trials'] = time_per_trial.num_trials.apply(lambda x: np.min([n_iters, np.max([x, 4])])).astype('int')
     
     return {k:v for k,v in zip(time_per_trial.model, time_per_trial.num_trials)}
 
@@ -602,8 +602,8 @@ for metric in run_params['metrics']:
     func_params = []
     func_params.extend(quant_params(df_train, [0.25, 0.75], min_samples,  num_trials, run_params))
     func_params.extend(reg_params(df_train, min_samples, num_trials, run_params))
-    func_params.extend(class_params(df_train_class, min_samples, num_trials, run_params, is_parlay=False))
-    func_params.extend(class_params(df_train_parlay, min_samples, num_trials, run_params, is_parlay=True))
+    func_params.extend(class_params(df_train_class, int(min_samples/10), num_trials, run_params, is_parlay=False))
+    func_params.extend(class_params(df_train_parlay, int(min_samples/10), num_trials, run_params, is_parlay=True))
     func_params = order_func_params(func_params, trial_times)
     
     # run all models in parallel
@@ -620,17 +620,20 @@ for metric in run_params['metrics']:
 
 #%%
 
-for m, label, df, model_obj, i, min_samples, alpha, n_iter in func_params[1:2]:
-
+jj = 0
+for m, label, df, model_obj, i, min_samples, alpha, n_iter in reversed(func_params):
+    if jj > 1: break
     model_name = m
     print(model_name)
     cur_df = df.copy()
-
-    best_models, oof_data, param_scores, trials = get_model_output(m, label, df, model_obj, run_params, i, min_samples, alpha, n_iter)
+    try:
+        best_models, oof_data, param_scores, trials = get_model_output(m, label, df, model_obj, run_params, i, min_samples, alpha, n_iter=n_iter)
+    except:
+        print(model_name, 'failed')
     # bayes_rand = run_params['opt_type']
     # proba = get_proba(model_obj)
     # trials = get_trials(label, model_name, bayes_rand)
-
+    jj += 1
     # skm, X, y = get_skm(cur_df, model_obj, to_drop=run_params['drop_cols'])
     # pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples, bayes_rand=bayes_rand)
     # if trials is not None: trials = update_trials_params(trials, model_name, params, pipe)

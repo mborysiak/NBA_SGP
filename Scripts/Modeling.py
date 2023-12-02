@@ -43,14 +43,13 @@ verbosity=50
 run_params = {
     
     # set year and week to analyze
-    'cv_time_input': '2023-03-20',
-    'train_time_split': '2023-11-11',
+    'cv_time_input': '2023-11-01',
+    'train_time_split': '2023-12-01',
     'metrics': [
-                # 'points', 'assists', 'rebounds',
-                # 'three_pointers','points_assists', 'points_rebounds',
-                # 'points_rebounds_assists', 'assists_rebounds',
-                # 'steals_blocks',
-                  'blocks', 'steals', 
+                'points', 'assists', 'rebounds',
+                'three_pointers','points_assists', 'points_rebounds',
+                'points_rebounds_assists', 'assists_rebounds',
+                'steals_blocks','blocks', 'steals', 
                 # 'total_points', 'spread'  
                 ],
     'n_iters': 20,

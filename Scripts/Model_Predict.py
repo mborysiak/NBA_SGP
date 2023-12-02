@@ -1,4 +1,5 @@
 #%%
+
 # core packages
 import pandas as pd
 import numpy as np
@@ -882,13 +883,12 @@ run_params = {
     # set year and week to analyze
     'last_train_date_orig': '2023-10-30',
     'train_date_orig': '2023-11-11',
-    'test_time_split_orig': '2023-11-21',
+    'test_time_split_orig': '2023-12-01',
 
     'metrics':  [
-                 'points','assists', 'rebounds', 'three_pointers','points_assists', 
-                  'points_rebounds', 'points_rebounds_assists', 'assists_rebounds',
-                  'steals_blocks', 'blocks', 'steals',
-               
+                 'points','assists', 'rebounds',
+                 'points_assists', 'points_rebounds', 'points_rebounds_assists', 'assists_rebounds',
+                 'three_pointers', 'steals_blocks', 'blocks', 'steals',
                 ],
 
     # opt params
@@ -903,10 +903,12 @@ run_params = {
 
     # set version and iterations
     'pred_vers': 'mse1_brier1',
-    'stack_model': 'random_kbest',
-    'stack_model_class': 'random_kbest',
-    # 'stack_model': 'random_full_stack',
-    # 'stack_model_class': 'random_full_stack',
+    # 'stack_model': 'random_kbest',
+    # 'stack_model_class': 'random_kbest',
+    'stack_model': 'random_full_stack',
+    'stack_model_class': 'random_full_stack',
+    # 'stack_model': 'random_full_stack_ind_cats',
+    # 'stack_model_class': 'random_full_stack_ind_cats',
     'parlay': False,
 
 }
@@ -991,8 +993,12 @@ teams.year = teams.year.apply(lambda x: int(x.replace('-', '')))
 #                             # ['2023-11-17', '2023-11-11'],
 #                             # ['2023-11-18', '2023-11-11'],
 #                             # ['2023-11-19', '2023-11-11'],
-#                             ['2023-11-20', '2023-11-11'],
-#                             ['2023-11-21', '2023-11-11'],
+#                             # ['2023-11-20', '2023-11-11'],
+#                             # ['2023-11-21', '2023-11-11'],
+#                             ['2023-11-22', '2023-11-11'],
+#                             ['2023-11-24', '2023-11-11'],
+#                             ['2023-11-25', '2023-11-11'],
+#                             ['2023-11-26', '2023-11-11'],
 #                             ]:
     
 #     run_params['train_date'] = int(tr_date.replace('-', ''))
@@ -1028,11 +1034,20 @@ for metric in run_params['metrics']:
     X_predict, X_predict_class = get_stack_predict_data(df_train, df_predict, df_train_prob, df_predict_prob, run_params, 
                                                         models_reg, models_quant, models_class)
     
-    if 'ind_cats' in run_params['stack_model']:
-        if metric in ['points', 'rebounds', 'assists']:
-            individual_cats[metric] = {} 
-            individual_cats = save_individual_stats(individual_cats, metric, X_stack, X_stack_class, X_predict, X_predict_class)
-    
+    if 'ind_cats' in run_params['stack_model'] and metric in ['points', 'rebounds', 'assists']:
+        individual_cats[metric] = {} 
+        individual_cats = save_individual_stats(individual_cats, metric, X_stack, X_stack_class, X_predict, X_predict_class)
+
+    if 'ind_cats' in run_params['stack_model'] and metric in [ 'points_assists', 'points_rebounds', 'points_rebounds_assists', 'assists_rebounds']:
+        for k,v in individual_cats.items():
+            if k in metric:
+                X_stack = pd.merge(X_stack, individual_cats[k]['X_stack'], on=['player', 'year']).reset_index(drop=True)
+                y_stack = pd.merge(y_stack, X_stack[['player', 'year']], on=['player', 'year']).reset_index(drop=True)
+                X_stack_class = pd.merge(X_stack_class, individual_cats[k]['X_stack_class'][['player', 'year']], on=['player', 'year']).reset_index(drop=True)
+                y_stack_class = pd.merge(y_stack_class, X_stack_class[['player', 'year']], on=['player', 'year']).reset_index(drop=True)
+                X_predict = pd.merge(X_predict, individual_cats[k]['X_predict'], on=['player', 'week', 'year']).reset_index(drop=True)
+                X_predict_class = pd.merge(X_predict_class, individual_cats[k]['X_predict_class'], on=['player', 'year']).reset_index(drop=True)
+
     X_stack_player = X_stack.copy()
     X_predict_class_player = X_predict_class.copy()
     X_stack = X_stack.drop(['player', 'year'], axis=1)
@@ -1095,6 +1110,9 @@ for metric in run_params['metrics']:
         dm.delete_from_db('Simulation', 'Over_Probability_New', del_str, create_backup=False)
         dm.write_to_db(output_prob,'Simulation', 'Over_Probability_New', 'append')
 
+#%%
+
+
 
 #%%
 
@@ -1155,6 +1173,15 @@ def get_date_info(df):
     return df
 
 
+def train_split(train_pred, test_date):
+
+    train_dates = train_pred.game_date.sort_values().unique()[-45:]
+    test_pred = train_pred[train_pred.game_date == test_date]
+    train_pred = train_pred[(train_pred.game_date < test_date) & (train_pred.game_date.isin(train_dates))]
+    train_pred = train_pred.sample(frac=1, random_state=i).reset_index(drop=True)
+
+    return train_pred, test_pred
+
 def preprocess_X(df, wt_col):
     X = df[['decimal_odds', 'value', 'prob_over', 'pred_mean', 'pred_q25', 'pred_q50', 'pred_q75']].copy()
     X = create_value_compare_col(X)
@@ -1167,7 +1194,9 @@ def preprocess_X(df, wt_col):
                    X, 
                    pd.get_dummies(df.metric), 
                    pd.get_dummies(df.day_of_week, prefix='day'),
-                   pd.get_dummies(df.month, prefix='month')
+                   pd.get_dummies(df.month, prefix='month'),
+                #    pd.get_dummies(df.ens_vers, prefix='ens_vers'),
+                #    pd.get_dummies(df.train_date, prefix='train_date'),
                    ], axis=1)
     return X
 
@@ -1214,7 +1243,7 @@ def get_past_runs(ens_vers):
         val_greater = row.value_cut_greater
         val_less = row.value_cut_less
         wt_col = row.wt_col
-        include_under = np.where(row.include_under==1, True, False)
+        include_under = np.where(row.include_under=='1', True, False)
 
         save_path = create_save_path(decimal_cut_greater, decimal_cut_less, val_greater, val_less, wt_col, include_under)
         if os.path.exists(save_path) and f'{ens_vers}.p' in os.listdir(save_path):
@@ -1283,10 +1312,10 @@ def run_past_choices(ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_c
             ORDER BY game_date ASC
             '''
 
-    check_path = create_save_path(decimal_cut_greater, decimal_cut_less, val_greater, val_less, wt_col, include_under)
+    save_path = create_save_path(decimal_cut_greater, decimal_cut_less, val_greater, val_less, wt_col, include_under)
     game_dates = pull_game_dates(q)
-
-    if check_path.split('/')[-1] in past_runs:
+    
+    if save_path.split('/')[-1] in past_runs:
         last_run = find_last_run(ens_vers, decimal_cut_greater, decimal_cut_less, val_greater, val_less, wt_col, include_under)
         final_ens_choices, orig_choices = fill_winnings_last_run(last_run)
         trial_obj = get_past_trials(ens_vers, decimal_cut_greater, decimal_cut_less, val_greater, val_less, wt_col, include_under)
@@ -1299,87 +1328,91 @@ def run_past_choices(ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_c
         game_dates = game_dates[3:]
         num_trials = 52
 
-    for test_date in game_dates:
+    if len(game_dates)>0:
+        for test_date in game_dates:
 
-        num_trials = np.max([num_trials-2, 10])
-        print('Date:', test_date)
-        train_pred = dm.read(q, 'Simulation')
-        train_pred = train_pred.drop('y_act', axis=1).rename(columns={'y_act_prob': 'y_act'})
-        train_pred = get_date_info(train_pred)
+            num_trials = np.max([num_trials-2, 10])
+            print('Date:', test_date)
 
-        test_pred = train_pred[train_pred.game_date == test_date]
-        train_pred = train_pred[train_pred.game_date < test_date].sample(frac=1, random_state=i).reset_index(drop=True)
+            train_pred = dm.read(q, 'Simulation')
+            train_pred = train_pred.drop('y_act', axis=1).rename(columns={'y_act_prob': 'y_act'})
+            train_pred = get_date_info(train_pred)
+            train_pred, test_pred = train_split(train_pred, test_date)
 
-        X_train = preprocess_X(train_pred, wt_col)
-        X_test = preprocess_X(test_pred, wt_col)
-        y_train = train_pred.y_act
+            X_train = preprocess_X(train_pred, wt_col)
+            X_test = preprocess_X(test_pred, wt_col)
+            y_train = train_pred.y_act
 
-        model_obj = 'class'
-        final_m = 'lr_c'
-        skm, _, _ = get_skm(pd.concat([X_train, y_train], axis=1), model_obj, to_drop=[])
-        pipe, params = get_full_pipe(skm, final_m, stack_model=run_params['stack_model'], alpha=None, 
-                                    min_samples=10, bayes_rand=run_params['opt_type'])
+            model_obj = 'class'
+            final_m = 'lr_c'
+            skm, _, _ = get_skm(pd.concat([X_train, y_train], axis=1), model_obj, to_drop=[])
+            pipe, params = get_full_pipe(skm, final_m, stack_model=run_params['stack_model'], alpha=None, 
+                                        min_samples=10, bayes_rand=run_params['opt_type'])
+            
+            best_model, _, _, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
+                                                        n_iter=num_trials, alpha=None, wt_col=wt_col,
+                                                        trials=trial_obj, bayes_rand=run_params['opt_type'],
+                                                        run_adp=False, print_coef=False,
+                                                        proba=True, num_k_folds=run_params['num_k_folds'],
+                                                        random_state=(i*2)+(i*7))
+
+            for c in X_train.columns:
+                if c not in X_test.columns:
+                    X_test[c] = 0
+
+            X_test = X_test[X_train.columns]
+
+            best_model.fit(X_train, y_train)
+            preds = pd.Series(best_model.predict_proba(X_test)[:,1], name='final_pred')
+            preds = pd.concat([preds, test_pred.reset_index(drop=True)], axis=1)
+            if include_under:
+                preds = flip_probs(preds)
+
+            player_max_pred = preds.groupby('player').agg({'final_pred': 'max'}).reset_index()
+            preds = pd.merge(preds, player_max_pred, on=['player', 'final_pred'])
+            preds = preds.sort_values(by='final_pred', ascending=False).reset_index(drop=True)
+
+            player_max_pred_orig = test_pred.groupby('player').agg({'prob_over': 'max'}).reset_index()
+            preds_orig = pd.merge(test_pred, player_max_pred_orig, on=['player', 'prob_over'])
+            preds_orig = preds_orig.sort_values(by='prob_over', ascending=False).reset_index(drop=True)
+
+            final_ens_choices = fill_choices_dict(final_ens_choices, preds)
+            orig_choices = fill_choices_dict(orig_choices, preds_orig)
+
+        final_ens = aggregate_choices(final_ens_choices)
+        orig_ch = aggregate_choices(orig_choices)
+
+        final_ens = format_choices_output(final_ens, ens_vers, rank_order='stack_model', val_greater=val_greater, val_less=val_less, wt_col=wt_col,
+                                            decimal_cut_greater=decimal_cut_greater, decimal_cut_less=decimal_cut_less, include_under=include_under,
+                                            game_dates=game_dates)
+        orig_ch = format_choices_output(orig_ch, ens_vers, rank_order='original', val_greater=val_greater, val_less=val_less, wt_col=wt_col,
+                                            decimal_cut_greater=decimal_cut_greater, decimal_cut_less=decimal_cut_less, include_under=include_under,
+                                            game_dates=game_dates)
+
+        include_under_q = np.where(include_under, 1, 0)
+        wt_col_q = np.where(wt_col is None, 'IS NULL', f"='{wt_col}'")
+
+        del_str = f'''value_cut_greater='{val_greater}'
+                    AND value_cut_less='{val_less}'
+                    AND wt_col {wt_col_q}
+                    AND decimal_cut_greater='{decimal_cut_greater}'
+                    AND decimal_cut_less='{decimal_cut_less}'
+                    AND include_under={include_under_q}
+                    AND ens_vers = '{ens_vers}'
+                '''
+
+        dm.delete_from_db('Simulation', 'Over_Probability_Choices', del_str, create_backup=False)
+        dm.write_to_db(final_ens,'Simulation', 'Over_Probability_Choices', 'append', create_backup=False)
+        dm.write_to_db(orig_ch,'Simulation', 'Over_Probability_Choices', 'append', create_backup=False)
+
         
-        best_model, _, _, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
-                                                     n_iter=num_trials, alpha=None, wt_col=wt_col,
-                                                     trials=trial_obj, bayes_rand=run_params['opt_type'],
-                                                     run_adp=False, print_coef=False,
-                                                     proba=True, num_k_folds=run_params['num_k_folds'],
-                                                     random_state=(i*2)+(i*7))
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
+        save_pickle(trial_obj, save_path, ens_vers)
 
-        for c in X_train.columns:
-            if c not in X_test.columns:
-                X_test[c] = 0
-
-        X_test = X_test[X_train.columns]
-
-        best_model.fit(X_train, y_train)
-        preds = pd.Series(best_model.predict_proba(X_test)[:,1], name='final_pred')
-        preds = pd.concat([preds, test_pred.reset_index(drop=True)], axis=1)
-        if include_under:
-            preds = flip_probs(preds)
-
-        player_max_pred = preds.groupby('player').agg({'final_pred': 'max'}).reset_index()
-        preds = pd.merge(preds, player_max_pred, on=['player', 'final_pred'])
-        preds = preds.sort_values(by='final_pred', ascending=False).reset_index(drop=True)
-
-        player_max_pred_orig = test_pred.groupby('player').agg({'prob_over': 'max'}).reset_index()
-        preds_orig = pd.merge(test_pred, player_max_pred_orig, on=['player', 'prob_over'])
-        preds_orig = preds_orig.sort_values(by='prob_over', ascending=False).reset_index(drop=True)
-
-        final_ens_choices = fill_choices_dict(final_ens_choices, preds)
-        orig_choices = fill_choices_dict(orig_choices, preds_orig)
-
-    final_ens = aggregate_choices(final_ens_choices)
-    orig_ch = aggregate_choices(orig_choices)
-
-    final_ens = format_choices_output(final_ens, ens_vers, rank_order='stack_model', val_greater=val_greater, val_less=val_less, wt_col=wt_col,
-                                        decimal_cut_greater=decimal_cut_greater, decimal_cut_less=decimal_cut_less, include_under=include_under,
-                                        game_dates=game_dates)
-    orig_ch = format_choices_output(orig_ch, ens_vers, rank_order='original', val_greater=val_greater, val_less=val_less, wt_col=wt_col,
-                                        decimal_cut_greater=decimal_cut_greater, decimal_cut_less=decimal_cut_less, include_under=include_under,
-                                        game_dates=game_dates)
-
-    include_under_q = np.where(include_under, 1, 0)
-    wt_col_q = np.where(wt_col is None, 'IS NULL', f"='{wt_col}'")
-
-    del_str = f'''value_cut_greater='{val_greater}'
-                  AND value_cut_less='{val_less}'
-                  AND wt_col {wt_col_q}
-                  AND decimal_cut_greater='{decimal_cut_greater}'
-                  AND decimal_cut_less='{decimal_cut_less}'
-                  AND include_under={include_under_q}
-                  AND ens_vers = '{ens_vers}'
-               '''
-
-    dm.delete_from_db('Simulation', 'Over_Probability_Choices', del_str, create_backup=False)
-    dm.write_to_db(final_ens,'Simulation', 'Over_Probability_Choices', 'append', create_backup=False)
-    dm.write_to_db(orig_ch,'Simulation', 'Over_Probability_Choices', 'append', create_backup=False)
-
-    save_path = create_save_path(decimal_cut_greater, decimal_cut_less, val_greater, val_less, wt_col, include_under)
-    if not os.path.exists(save_path):
-        os.makedirs(save_path)
-    save_pickle(trial_obj, save_path, ens_vers)
+    else:
+        final_ens = aggregate_choices(final_ens_choices)
+        orig_ch = aggregate_choices(orig_choices)
 
     return save_path, final_ens, orig_ch
 
@@ -1427,88 +1460,121 @@ ens_vers = 'random_full_stack_matt0_brier1_include2_kfold3'
 run_params['stack_model'] = 'random_full_stack'
 run_params['stack_model_class'] = 'random_full_stack'
 
-# # determined using iterative modeling starting from stack_model, include_under=1, start_spot<=1
-# decimal_cut_greater = '>0'
-# decimal_cut_less = '<=3'
-# val_greater = '>4.5'
-# val_less = '<100'
-# wt_col = 'decimal_odds_twomax'
-# include_under = True
-# stack_model = True
+query_cuts = {
+    
+    'no_under_high_cut': {
 
-# determined using iterative modeling starting from stack_model, include_under=0, start_spot<=1
-decimal_cut_greater = '>0'
-decimal_cut_less = '<=3'
-val_greater = '>1.5'
-val_less = '<100'
-wt_col = 'decimal_odds_twomax'
-include_under = False
-stack_model = True
+        #  determined using iterative modeling starting from stack_model, include_under=0
+        'decimal_cut_greater': '>0',
+        'decimal_cut_less': '<=3',
+        'val_greater': '>4.5',
+        'val_less': '<50',
+        'wt_col': 'decimal_odds_twomax',
+        'include_under': False,
+        'stack_model': True
+    },
 
-q = f'''SELECT * 
-        FROM Over_Probability_New 
-        WHERE value {val_greater}
-            AND value {val_less}
-            AND decimal_odds {decimal_cut_greater}
-            AND decimal_odds {decimal_cut_less}
-            AND ens_vers = '{ens_vers}'
-        ORDER BY game_date ASC
-        '''
+    'yes_under_high_cut': {
 
-trials_obj = get_past_trials(ens_vers, decimal_cut_greater, decimal_cut_less, val_greater, val_less, wt_col, include_under)
+        # determined using iterative modeling starting from stack_model, include_under=1, start_spot<=1
+        'decimal_cut_greater': '>0',
+        'decimal_cut_less': '<=3',
+        'val_greater': '>4.5',
+        'val_less': '<100',
+        'wt_col': 'decimal_odds_twomax',
+        'include_under': True,
+        'stack_model': True
+    },
 
-orig_predict = dm.read(q, 'Simulation')
-orig_predict = orig_predict[orig_predict.game_date==test_date]
-if include_under:
-    orig_predict = flip_probs(orig_predict)
+    'no_under_low_cut': {
 
-if not stack_model:
-    display(orig_predict.sort_values(by='prob_over', ascending=False).iloc[:50])
+        #  determined using iterative modeling starting from stack_model, include_under=0, num_choices <= 4
+        'decimal_cut_greater': '>0',
+        'decimal_cut_less': '<=2.3',
+        'val_greater': '>1.5',
+        'val_less': '<50',
+        'wt_col': 'decimal_odds_twomax',
+        'include_under': False,
+        'stack_model': True
+    },
+}
 
-else:
+for cut_name, cut_dict in query_cuts.items():
 
-    run_params['cur_metric'] = 'points'
-    train_pred = dm.read(q, 'Simulation')
-    train_pred = get_date_info(train_pred)
-                            
-    train_pred = train_pred.drop('y_act', axis=1).rename(columns={'y_act_prob': 'y_act'})
-    test_pred = train_pred[train_pred.game_date == test_date]
-    train_pred = train_pred[train_pred.game_date < test_date].sample(frac=1, random_state=i).reset_index(drop=True)
+    decimal_cut_greater = cut_dict['decimal_cut_greater']
+    decimal_cut_less = cut_dict['decimal_cut_less']
+    val_greater = cut_dict['val_greater']
+    val_less = cut_dict['val_less']
+    wt_col = cut_dict['wt_col']
+    include_under = cut_dict['include_under']
+    stack_model = cut_dict['stack_model']
 
-    X_train = preprocess_X(train_pred, wt_col)
-    X_test = preprocess_X(test_pred, wt_col)
-    y_train = train_pred.y_act
+    print('\n=======\n', val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, '\n=======\n')
 
-    model_obj = 'class'
-    final_m = 'lr_c'
-    skm, _, _ = get_skm(pd.concat([X_train, y_train], axis=1), model_obj, to_drop=[])
-    pipe, params = get_full_pipe(skm, final_m, stack_model=run_params['stack_model'], alpha=None, 
-                                min_samples=10, bayes_rand=run_params['opt_type'])
+    q = f'''SELECT * 
+            FROM Over_Probability_New 
+            WHERE value {val_greater}
+                AND value {val_less}
+                AND decimal_odds {decimal_cut_greater}
+                AND decimal_odds {decimal_cut_less}
+                AND ens_vers = '{ens_vers}'
+            ORDER BY game_date ASC
+            '''
 
-    best_model, stack_scores, stack_pred, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
-                                                                    n_iter=10, alpha=None, wt_col=wt_col,
-                                                                    trials=trials_obj, bayes_rand=run_params['opt_type'],
-                                                                    run_adp=False, print_coef=False,
-                                                                    proba=True, num_k_folds=run_params['num_k_folds'],
-                                                                    random_state=100)
-    show_calibration_curve(stack_pred['y'],stack_pred['stack_pred'])
+    trials_obj = get_past_trials(ens_vers, decimal_cut_greater, decimal_cut_less, val_greater, val_less, wt_col, include_under)
 
-    for c in X_train.columns:
-        if c not in X_test.columns:
-            X_test[c] = 0
-
-    X_test = X_test[X_train.columns]
-
-    best_model.fit(X_train, y_train)
-    preds = pd.Series(best_model.predict_proba(X_test)[:,1], name='final_pred')
-    preds = pd.concat([preds, test_pred.reset_index(drop=True)], axis=1)
-
+    orig_predict = dm.read(q, 'Simulation')
+    orig_predict = orig_predict[orig_predict.game_date==test_date]
     if include_under:
-        preds = flip_probs(preds)
+        orig_predict = flip_probs(orig_predict)
 
-    preds = preds.sort_values(by='final_pred', ascending=False)
+    if not stack_model:
+        display(orig_predict.sort_values(by='prob_over', ascending=False).iloc[:50])
 
-    display(preds.iloc[:50])
+    else:
+
+        run_params['cur_metric'] = 'points'
+        train_pred = dm.read(q, 'Simulation')
+        train_pred = get_date_info(train_pred)
+        train_pred = train_pred.drop('y_act', axis=1).rename(columns={'y_act_prob': 'y_act'})
+
+        train_pred, test_pred = train_split(train_pred, test_date)
+
+        X_train = preprocess_X(train_pred, wt_col)
+        X_test = preprocess_X(test_pred, wt_col)
+        y_train = train_pred.y_act
+
+        model_obj = 'class'
+        final_m = 'lr_c'
+        skm, _, _ = get_skm(pd.concat([X_train, y_train], axis=1), model_obj, to_drop=[])
+        pipe, params = get_full_pipe(skm, final_m, stack_model=run_params['stack_model'], alpha=None, 
+                                    min_samples=10, bayes_rand=run_params['opt_type'])
+
+        best_model, stack_scores, stack_pred, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
+                                                                        n_iter=10, alpha=None, wt_col=wt_col,
+                                                                        trials=trials_obj, bayes_rand=run_params['opt_type'],
+                                                                        run_adp=False, print_coef=False,
+                                                                        proba=True, num_k_folds=run_params['num_k_folds'],
+                                                                        random_state=100)
+        show_calibration_curve(stack_pred['y'],stack_pred['stack_pred'])
+
+        for c in X_train.columns:
+            if c not in X_test.columns:
+                X_test[c] = 0
+
+        X_test = X_test[X_train.columns]
+
+        best_model.fit(X_train, y_train)
+        preds = pd.Series(best_model.predict_proba(X_test)[:,1], name='final_pred')
+        preds = pd.concat([preds, test_pred.reset_index(drop=True)], axis=1)
+
+        if include_under:
+            preds = flip_probs(preds)
+
+        preds = preds.sort_values(by='final_pred', ascending=False)
+
+        display(preds.iloc[:50])
+
 
  #%%
 
@@ -1518,11 +1584,13 @@ import shap
 
 choice_params = dm.read('''SELECT * 
                            FROM Over_Probability_Choices
-                           WHERE rank_order='stack_model'
-                                 AND include_under=0
-                                 AND start_spot <= 1
+                           WHERE num_choices <= 3
+                                 AND rank_order='stack_model'
                                  AND value_cut_greater='>1.5'
                                  AND decimal_cut_greater='>0'
+                                 AND decimal_cut_less='<=2.3'
+                                 AND value_cut_less='<50'
+                                 AND include_under=0
                            ''', 'Simulation')
 X = choice_params.drop('winnings', axis=1)
 for c in X.columns:

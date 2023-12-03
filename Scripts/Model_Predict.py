@@ -883,7 +883,7 @@ run_params = {
     # set year and week to analyze
     'last_train_date_orig': '2023-10-30',
     'train_date_orig': '2023-11-11',
-    'test_time_split_orig': '2023-12-01',
+    'test_time_split_orig': '2023-12-02',
 
     'metrics':  [
                  'points','assists', 'rebounds',

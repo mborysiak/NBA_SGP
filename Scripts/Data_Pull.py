@@ -219,6 +219,65 @@ class DKScraper():
                     })
         df = self.clean_stat_cat(df)
         return df
+    
+#%%
+fname = 'fantasy-basketball-projections.csv'
+
+today_date = dt.datetime.now().date()
+# today_date = dt.date(2023, 11, 15)
+date_str = today_date.strftime('%Y%m%d')
+try: os.replace(f"/Users/borys/Downloads/{fname}", 
+                f"{root_path}/Data/OtherData/FantasyData/{date_str}_{fname}")
+except: pass
+
+df = pd.read_csv(f"{root_path}/Data/OtherData/FantasyData/{date_str}_{fname}").dropna(axis=0)
+
+df = df.rename(columns={'Name': 'player',
+                        'Rank': 'rank',
+                        'Team': 'team',
+                        'Position': 'position',
+                        'Opponent': 'opponent',
+                        'Points': 'points',
+                        'Rebounds': 'rebounds',
+                        'Assists': 'assists',
+                        'Steals': 'steals',
+                        'BlockedShots': 'blocks',
+                        'FieldGoalsPercentage': 'fg_pct',
+                        'FreeThrowsPercentage': 'ft_pct',
+                        'ThreePointersPercentage': 'three_point_pct',
+                        'FreeThrowsMade': 'ft_made',
+                        'TwoPointersMade': 'two_point_made',
+                        'ThreePointersMade': 'three_pointers',
+                        'Turnovers': 'turnovers',
+                        'Minutes': 'minutes',
+                        'FantasyPoints': 'fantasy_points'})
+
+df['game_date'] = today_date
+
+df.player = df.player.apply(dc.name_clean)
+df.team = df.team.apply(lambda x: x.lstrip().rstrip())
+df[['fg_pct', 'ft_pct']] = df[['fg_pct', 'ft_pct']] / 100
+
+dm.delete_from_db('Player_Stats', 'FantasyData', f"game_date='{today_date}'", create_backup=False)
+dm.write_to_db(df, 'Player_Stats', 'FantasyData', if_exist='append')
+
+#%%
+
+player_teams = dm.read('''SELECT player, team
+                          FROM (
+                          SELECT player, team,
+                                 row_number() OVER (PARTITION BY player ORDER BY game_date DESC) AS rn 
+                          FROM FantasyData 
+                          ) 
+                          WHERE rn = 1''', 'Player_Stats')
+
+schedule = dm.read("SELECT * FROM NBA_Schedule", 'Team_Stats')
+schedule.game_time = pd.to_datetime(schedule.game_time)
+today = dt.datetime.now() 
+tomorrow = dt.datetime.now() + dt.timedelta(hours=12)
+schedule = schedule[(schedule.game_time > today) & (schedule.game_time < tomorrow)]
+teams = schedule[['game_time', 'home_team', 'away_team']].melt(id_vars='game_time', value_name='team')[['game_time', 'team']]
+player_teams = pd.merge(player_teams, teams, on='team')
 
 #%%
 nba_scrape = DKScraper(base_url='https://sportsbook.draftkings.com//sites/US-NJ-SB/api/v5/eventgroups/', event_group_id=42648)
@@ -226,7 +285,8 @@ props = nba_scrape.nba_props_dk()
 props_df = nba_scrape.dict_to_df(props)
 props_df['game_date'] = dt.datetime.now().date()
 props_df.player = props_df.player.apply(dc.name_clean)
-
+props_df = pd.merge(props_df, player_teams, on='player')
+props_df = props_df.drop(['team', 'game_time'], axis=1)
 props_df.head(25)
 
 #%%
@@ -235,7 +295,12 @@ games_df['game_date'] = dt.datetime.now().date()
 games_df.head(16)
 
 # %%
-dm.delete_from_db('Player_Stats', 'Draftkings_Odds', f"game_date='{dt.datetime.now().date()}'", create_backup=False)
+
+last_run = dm.read(f"SELECT * FROM Draftkings_Odds WHERE game_date='{dt.datetime.now().date()}'", 'Player_Stats')
+last_run = last_run[~last_run.player.isin(props_df.player.unique())]
+props_df = pd.concat([props_df, last_run], axis=0)
+
+dm.delete_from_db('Player_Stats', 'Draftkings_Odds', f"game_date='{dt.datetime.now().date()}'", create_backup=True)
 dm.write_to_db(props_df, 'Player_Stats', 'Draftkings_Odds', 'append')
 
 dm.delete_from_db('Team_Stats', 'Draftkings_Odds', f"game_date='{dt.datetime.now().date()}'", create_backup=True)
@@ -299,47 +364,6 @@ df.team = df.team.apply(lambda x: x.lstrip().rstrip())
 
 dm.delete_from_db('Player_Stats', 'FantasyPros', f"game_date='{dt.datetime.now().date()}'", create_backup=False)
 dm.write_to_db(df, 'Player_Stats', 'FantasyPros', if_exist='append')
-
-#%%
-fname = 'fantasy-basketball-projections.csv'
-
-today_date = dt.datetime.now().date()
-# today_date = dt.date(2023, 11, 15)
-date_str = today_date.strftime('%Y%m%d')
-try: os.replace(f"/Users/borys/Downloads/{fname}", 
-                f"{root_path}/Data/OtherData/FantasyData/{date_str}_{fname}")
-except: pass
-
-df = pd.read_csv(f"{root_path}/Data/OtherData/FantasyData/{date_str}_{fname}").dropna(axis=0)
-
-df = df.rename(columns={'Name': 'player',
-                        'Rank': 'rank',
-                        'Team': 'team',
-                        'Position': 'position',
-                        'Opponent': 'opponent',
-                        'Points': 'points',
-                        'Rebounds': 'rebounds',
-                        'Assists': 'assists',
-                        'Steals': 'steals',
-                        'BlockedShots': 'blocks',
-                        'FieldGoalsPercentage': 'fg_pct',
-                        'FreeThrowsPercentage': 'ft_pct',
-                        'ThreePointersPercentage': 'three_point_pct',
-                        'FreeThrowsMade': 'ft_made',
-                        'TwoPointersMade': 'two_point_made',
-                        'ThreePointersMade': 'three_pointers',
-                        'Turnovers': 'turnovers',
-                        'Minutes': 'minutes',
-                        'FantasyPoints': 'fantasy_points'})
-
-df['game_date'] = today_date
-
-df.player = df.player.apply(dc.name_clean)
-df.team = df.team.apply(lambda x: x.lstrip().rstrip())
-df[['fg_pct', 'ft_pct']] = df[['fg_pct', 'ft_pct']] / 100
-
-dm.delete_from_db('Player_Stats', 'FantasyData', f"game_date='{today_date}'", create_backup=False)
-dm.write_to_db(df, 'Player_Stats', 'FantasyData', if_exist='append')
 
 #%%
 
@@ -449,7 +473,7 @@ nba_stats = NBAStats()
 
 #%%
 import time
-yesterday_date = dt.datetime(2023, 11, 30).date()
+yesterday_date = dt.datetime(2023, 12, 1).date()
 
 box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score', yesterday_date)
 time.sleep(5)
@@ -481,9 +505,40 @@ team = team.groupby('game_date').agg({'team': 'count'}).reset_index()
 
 pd.merge(df, team, on='game_date')
 
-#%%
-# import sqlite3
-# conn = sqlite3.connect('c:/Users/borys/Downloads/Team_Stats.sqlite3')
-# df = pd.read_sql_query("SELECT * FROM Draftkings_Odds", conn)
-# dm.write_to_db(df, 'Team_Stats', 'Draftkings_Odds', 'append')
+# %%
+
+# # get NBA schedule data as JSON
+# import requests
+# year = '2023'
+# r = requests.get('https://data.nba.com/data/10s/v2015/json/mobile_teams/nba/' + year + '/league/00_full_schedule.json')
+# json_data = r.json()
+
+# # prepare output files
+# data = []
+
+# # loop through each month/game and write out stats to file
+# for i in range(len(json_data['lscd'])):
+#     for j in range(len(json_data['lscd'][i]['mscd']['g'])):
+#         gamedate = json_data['lscd'][i]['mscd']['g'][j]['gdte']
+#         etm = json_data['lscd'][i]['mscd']['g'][j]['etm']
+#         stt = json_data['lscd'][i]['mscd']['g'][j]['stt']
+#         game_id = json_data['lscd'][i]['mscd']['g'][j]['gid']
+#         visiting_team = json_data['lscd'][i]['mscd']['g'][j]['v']['ta']
+#         home_team = json_data['lscd'][i]['mscd']['g'][j]['h']['ta']
+#         data.append([gamedate, etm, stt, game_id, home_team, visiting_team])
+
+# df = pd.DataFrame(data, columns=['game_date', 'game_time', 'standard_time', 'game_id','home_team', 'away_team'])
+# team_update = {
+#                'GSW': 'GS',
+#                'PHX': 'PHO',
+#                'NOP': 'NO',
+#                'NYK': 'NY',
+#                'SAS': 'SA'
+#                }
+# for ot, nt in team_update.items():
+#     df.loc[df.home_team==ot, 'home_team'] = nt
+#     df.loc[df.away_team==ot, 'away_team'] = nt
+
+# dm.write_to_db(df, 'Team_Stats', 'NBA_Schedule', 'replace')
+
 # %%

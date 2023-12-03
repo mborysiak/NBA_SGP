@@ -658,7 +658,7 @@ def get_columns(df, train_date, threshold=0.05):
 
 #%%
 
-train_date = '2023-12-01'
+train_date = '2023-11-11'
 max_date = dm.read("SELECT max(game_date) FROM FantasyData", 'Player_Stats').values[0][0]
 
 df = fantasy_data()

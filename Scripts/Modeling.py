@@ -46,8 +46,8 @@ run_params = {
     'cv_time_input': '2023-11-01',
     'train_time_split': '2023-12-01',
     'metrics': [
-                'points', 'assists', 'rebounds',
-                'three_pointers','points_assists', 'points_rebounds',
+                # 'points', 'assists', 'rebounds',
+                # 'three_pointers','points_assists', 'points_rebounds',
                 'points_rebounds_assists', 'assists_rebounds',
                 'steals_blocks','blocks', 'steals', 
                 # 'total_points', 'spread'  

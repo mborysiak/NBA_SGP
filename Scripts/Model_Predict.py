@@ -179,6 +179,7 @@ def get_full_pipe(skm, m, alpha=None, stack_model=False, min_samples=10, bayes_r
         params['random_sample__frac'] = hp.uniform('random_sample__frac', 0.5, 1)
     elif stack_model=='random_full_stack' and run_params['opt_type']=='rand':
         params['random_sample__frac'] = np.arange(0.5, 1, 0.05)
+
         # params['select_perc__percentile'] = hp.uniform('percentile', 0.5, 1)
         # params['feature_union__agglomeration__n_clusters'] = scope.int(hp.quniform('n_clusters', 2, 10, 1))
         # params['feature_union__pca__n_components'] = scope.int(hp.quniform('n_components', 2, 10, 1))
@@ -704,12 +705,33 @@ def run_stack_models(fname, final_m, i, model_obj, alpha, X_stack, y_stack, run_
     try: n_iter = num_trials[final_m]
     except: n_iter = run_params['n_iters']
 
-    best_model, stack_scores, stack_pred, trial = skm.best_stack(pipe, params, X_stack, y_stack, 
-                                                                n_iter=n_iter, alpha=alpha, wt_col=wt_col,
-                                                                trials=trials, bayes_rand=run_params['opt_type'],
-                                                                run_adp=False, print_coef=print_coef,
-                                                                proba=proba, num_k_folds=run_params['num_k_folds'],
-                                                                random_state=(i*2)+(i*7))
+    try:
+        best_model, stack_scores, stack_pred, trial = skm.best_stack(pipe, params, X_stack, y_stack, 
+                                                                    n_iter=n_iter, alpha=alpha, wt_col=wt_col,
+                                                                    trials=trials, bayes_rand=run_params['opt_type'],
+                                                                    run_adp=False, print_coef=print_coef,
+                                                                    proba=proba, num_k_folds=run_params['num_k_folds'],
+                                                                    random_state=(i*2)+(i*7))
+    except:
+        print(f"Error with {final_m}. Running backup model")
+        
+        backup_models = {
+            'reg': 'ridge',
+            'class': 'lr_c',
+            'quantile': 'qr_q'
+        }
+        
+        trial = trials
+        backup_model = backup_models[model_obj]
+        pipe, params = get_full_pipe(skm, backup_model, stack_model='kbest', alpha=alpha, 
+                                    min_samples=min_samples, bayes_rand=run_params['opt_type'])
+
+        best_model, stack_scores, stack_pred, _ = skm.best_stack(pipe, params, X_stack, y_stack, 
+                                                                    n_iter=n_iter, alpha=alpha, wt_col=None,
+                                                                    trials=Trials(), bayes_rand=run_params['opt_type'],
+                                                                    run_adp=False, print_coef=print_coef,
+                                                                    proba=proba, num_k_folds=run_params['num_k_folds'],
+                                                                    random_state=(i*2)+(i*7))
     
     return best_model, stack_scores, stack_pred, trial
 
@@ -784,6 +806,11 @@ def load_run_models(run_params, X_stack, y_stack, X_predict, model_obj, alpha=No
         num_trials = {m: run_params['n_iters'] for m in model_list}
 
     if (run_params['cur_metric']=='assists' and run_params['train_date']==20230328 
+        and model_obj=='quantile' and run_params['stack_model']=='random_full_stack_ind_cats'):
+        func_params = [f for f in func_params if f[0]!='gbm_q']
+        model_list = [m for m in model_list if m!='gbm_q']
+    
+    if (run_params['cur_metric']=='assists' and run_params['train_date']==20230328
         and model_obj=='reg' and run_params['stack_model']=='random_full_stack_ind_cats'):
         func_params = [f for f in func_params if f[0]!='gbm']
         model_list = [m for m in model_list if m!='gbm']
@@ -931,7 +958,7 @@ def create_metric_split_columns_stack(df, metric, individual_cats):
 #     # set year and week to analyze
 #     'last_train_date_orig': '2023-11-11',
 #     'train_date_orig': '2023-12-01',
-#     'test_time_split_orig': '2023-12-08',
+#     'test_time_split_orig': dt.date.today().strftime('%Y-%m-%d'),
 
 #     'metrics':  [
 #                  'points', 'assists', 'rebounds',
@@ -1737,8 +1764,8 @@ dm.write_to_db(df,'Player_Stats', 'DraftKings_Odds', 'replace', create_backup=Tr
 # %%
 
 is_parlay = False
-alpha=0.75
-model_obj = 'quantile'
+alpha=None
+model_obj = 'reg'
 
 
 if is_parlay: model_obj_label = 'is_parlay'
@@ -1784,45 +1811,55 @@ if os.path.exists(f"{path}/{fname}.p"):
 
 else:
     
-    results = Parallel(n_jobs=-1, verbose=50)(
-                    delayed(run_stack_models)
-                    (fname, final_m, i, model_obj, alpha, X_stack, y_stack, run_params, num_trials, is_parlay) 
-                    for final_m, i, model_obj, alpha in func_params
-                    )
-    best_models, scores, stack_val_pred, trials = unpack_results(model_list, results)
+    # results = Parallel(n_jobs=-1, verbose=50)(
+    #                 delayed(run_stack_models)
+    #                 (fname, final_m, i, model_obj, alpha, X_stack, y_stack, run_params, num_trials, is_parlay) 
+    #                 for final_m, i, model_obj, alpha in func_params
+    #                 )
+    # best_models, scores, stack_val_pred, trials = unpack_results(model_list, results)
     # save_stack_runs(path, fname, best_models, scores, stack_val_pred, trials)
     
-    # for final_m, i, model_obj, alpha in func_params:
-    #     print(f'\n{final_m}')
+    for final_m, i, model_obj, alpha in func_params:
+        print(f'\n{final_m}')
 
-    #     min_samples = int(len(y_stack)/10)
-    #     proba, _, print_coef = get_proba_adp_coef(model_obj, final_m, run_params)
-    #     skm, _, _ = get_skm(pd.concat([X_stack, y_stack], axis=1), model_obj, to_drop=[])
+        min_samples = int(len(y_stack)/10)
+        proba, _, print_coef = get_proba_adp_coef(model_obj, final_m, run_params)
+        skm, _, _ = get_skm(pd.concat([X_stack, y_stack], axis=1), model_obj, to_drop=[])
 
-    #     pipe, params = get_full_pipe(skm, final_m, stack_model=run_params['stack_model'], alpha=alpha, 
-    #                                 min_samples=min_samples, bayes_rand=run_params['opt_type'])
+        pipe, params = get_full_pipe(skm, final_m, stack_model=run_params['stack_model'], alpha=alpha, 
+                                    min_samples=min_samples, bayes_rand=run_params['opt_type'])
         
-    #     trials = get_trials(fname, final_m, run_params['opt_type'])
-    #     try: n_iter = int(num_trials[final_m]/2)
-    #     except: n_iter = int(run_params['n_iters']/2)
+        trials = get_trials(fname, final_m, run_params['opt_type'])
+        try: n_iter = int(num_trials[final_m]/2)
+        except: n_iter = int(run_params['n_iters']/2)
 
-    #     best_model, stack_scores, stack_pred, trial = skm.best_stack(pipe, params, X_stack, y_stack, 
-    #                                                                 n_iter=n_iter, alpha=alpha, wt_col=None,
-    #                                                                 trials=trials, bayes_rand=run_params['opt_type'],
-    #                                                                 run_adp=False, print_coef=print_coef,
-    #                                                                 proba=proba, num_k_folds=run_params['num_k_folds'],
-    #                                                                 random_state=(i*2)+(i*7))
+        try:
+            best_model, stack_scores, stack_pred, trial = skm.best_stack(pipe, params, X_stack, y_stack, 
+                                                                        n_iter=n_iter, alpha=alpha, wt_col=None,
+                                                                        trials=trials, bayes_rand=run_params['opt_type'],
+                                                                        run_adp=False, print_coef=print_coef,
+                                                                        proba=proba, num_k_folds=run_params['num_k_folds'],
+                                                                        random_state=(i*2)+(i*7))
+            
+        except:
+            backup_models = {
+                'reg': 'ridge',
+                'class': 'lr_c',
+                'quantile': 'qr_q'
+            }
+            
+            trial = trials
+            backup_model = backup_models[model_obj]
+            pipe, params = get_full_pipe(skm, backup_model, stack_model='kbest', alpha=alpha, 
+                                        min_samples=min_samples, bayes_rand=run_params['opt_type'])
 
-# X_predict = X_predict[X_stack.columns]
-# predictions = stack_predictions(X_predict, best_models, model_list, model_obj=model_obj)
-# best_val, best_predictions, _ = average_stack_models(scores, model_list, y_stack, stack_val_pred, 
-#                                                         predictions, model_obj=model_obj, 
-#                                                         show_plot=run_params['show_plot'], 
-#                                                         min_include=run_params['min_include'])
+            best_model, stack_scores, stack_pred, _ = skm.best_stack(pipe, params, X_stack, y_stack, 
+                                                                        n_iter=n_iter, alpha=alpha, wt_col=None,
+                                                                        trials=Trials(), bayes_rand=run_params['opt_type'],
+                                                                        run_adp=False, print_coef=print_coef,
+                                                                        proba=proba, num_k_folds=run_params['num_k_folds'],
+                                                                        random_state=(i*2)+(i*7))
 
-#%%
 
-# %%
 
-y_stack
 # %%

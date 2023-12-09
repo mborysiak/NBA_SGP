@@ -279,6 +279,7 @@ schedule = schedule[(schedule.game_time > today) & (schedule.game_time < tomorro
 teams = schedule[['game_time', 'home_team', 'away_team']].melt(id_vars='game_time', value_name='team')[['game_time', 'team']]
 player_teams = pd.merge(player_teams, teams, on='team')
 
+
 #%%
 nba_scrape = DKScraper(base_url='https://sportsbook.draftkings.com//sites/US-NJ-SB/api/v5/eventgroups/', event_group_id=42648)
 props = nba_scrape.nba_props_dk()
@@ -473,7 +474,7 @@ nba_stats = NBAStats()
 
 #%%
 import time
-yesterday_date = dt.datetime(2023, 12, 1).date()
+yesterday_date = dt.datetime(2023, 12, 7).date()
 
 box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score', yesterday_date)
 time.sleep(5)

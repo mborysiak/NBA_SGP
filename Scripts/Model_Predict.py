@@ -1697,153 +1697,17 @@ val_less_list = ['<100', '<50', '<40', '<30', '<20']
 iter_cats = list(set(itertools.product(wt_col_list, decimal_cut_greater_list, decimal_cut_less_list, include_under_list,
                                        val_greater_list, val_less_list)))
 
-# out = Parallel(n_jobs=-1, verbose=50)(
-#     delayed(run_past_choices)
-#     (ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less) 
-#     for wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less in iter_cats
-# )
+out = Parallel(n_jobs=-1, verbose=50)(
+    delayed(run_past_choices)
+    (ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less) 
+    for wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less in iter_cats
+)
 
-for wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less in iter_cats[2:3]:
-    x, y , z = run_past_choices(ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less)               
+# for wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less in iter_cats[2:3]:
+#     x, y , z = run_past_choices(ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less)               
+
 
 #%%
-wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less = iter_cats[1]
-
-print('\n=======\n', val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, '\n=======\n')
-
-q = f'''SELECT * 
-        FROM Over_Probability_New
-        WHERE value {val_greater}
-            AND value {val_less}
-            AND decimal_odds {decimal_cut_greater}
-            AND decimal_odds {decimal_cut_less}
-            AND ens_vers = '{ens_vers}'
-            AND y_act IS NOT NULL
-        ORDER BY game_date ASC
-        '''
-
-save_path = create_save_path(decimal_cut_greater, decimal_cut_less, val_greater, val_less, wt_col, include_under)
-game_dates = pull_game_dates(q)
-
-if save_path.split('/')[-1] in past_runs:
-    last_run = find_last_run(ens_vers, decimal_cut_greater, decimal_cut_less, val_greater, val_less, wt_col, include_under)
-    final_ens_choices, orig_choices, avg_choices = fill_winnings_last_run(last_run)
-    trial_obj = get_past_trials(ens_vers, decimal_cut_greater, decimal_cut_less, val_greater, val_less, wt_col, include_under)
-    game_dates = [d for d in game_dates if d > last_run.last_date.unique()[0]]
-    num_trials = 10
-    num_back_days = 45
-
-else:
-    final_ens_choices, orig_choices, avg_choices = get_choices_dict(), get_choices_dict(), get_choices_dict()
-    trial_obj = Trials()
-    game_dates = game_dates[3:]
-    num_trials = 52
-    num_back_days = 100
-
-if len(game_dates)>0:
-    for test_date in game_dates[:5]:
-
-        num_trials = np.max([num_trials-2, 10])
-        num_back_days = np.max([num_back_days-1, 45])
-        print('Date:', test_date)
-
-        train_pred = dm.read(q, 'Simulation')
-        train_pred = train_pred.drop('y_act', axis=1).rename(columns={'y_act_prob': 'y_act'})
-        train_pred = get_date_info(train_pred)
-        train_pred, test_pred = train_split(train_pred, test_date=test_date, num_back_days=num_back_days)
-        
-        X_train = preprocess_X(train_pred, wt_col)
-        X_test = preprocess_X(test_pred, wt_col)
-        y_train = train_pred.y_act
-
-        model_obj = 'class'
-        final_m = 'lr_c'
-        skm, _, _ = get_skm(pd.concat([X_train, y_train], axis=1), model_obj, to_drop=[])
-        pipe, params = get_full_pipe(skm, final_m, stack_model=run_params['stack_model'], alpha=None, 
-                                    min_samples=10, bayes_rand=run_params['opt_type'])
-        
-        best_model, _, _, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
-                                                    n_iter=num_trials, alpha=None, wt_col=wt_col,
-                                                    trials=trial_obj, bayes_rand=run_params['opt_type'],
-                                                    run_adp=False, print_coef=False,
-                                                    proba=True, num_k_folds=run_params['num_k_folds'],
-                                                    random_state=(i*2)+(i*7))
-
-        for c in X_train.columns:
-            if c not in X_test.columns:
-                X_test[c] = 0
-
-        X_test = X_test[X_train.columns]
-
-        best_model.fit(X_train, y_train)
-        preds = pd.Series(best_model.predict_proba(X_test)[:,1], name='final_pred')
-        preds = pd.concat([preds, test_pred.reset_index(drop=True)], axis=1)
-        preds_avg = preds.copy()
-        preds_avg['avg_prob'] = preds_avg[['final_pred', 'prob_over']].mean(axis=1)
-
-        if include_under:
-            preds = flip_probs(preds)
-            preds_avg = flip_probs(preds_avg, pred_col='avg_prob')
-            test_pred = flip_probs(test_pred, pred_col='prob_over')
-
-        player_max_avg = preds_avg.groupby('player').agg({'avg_prob': 'max'}).reset_index()
-        preds_avg = pd.merge(preds_avg, player_max_avg, on=['player', 'avg_prob'])
-        preds_avg = preds_avg.sort_values(by='avg_prob', ascending=False).reset_index(drop=True)
-
-        player_max_pred = preds.groupby('player').agg({'final_pred': 'max'}).reset_index()
-        preds = pd.merge(preds, player_max_pred, on=['player', 'final_pred'])
-        preds = preds.sort_values(by='final_pred', ascending=False).reset_index(drop=True)
-
-        player_max_pred_orig = test_pred.groupby('player').agg({'prob_over': 'max'}).reset_index()
-        preds_orig = pd.merge(test_pred, player_max_pred_orig, on=['player', 'prob_over'])
-        preds_orig = preds_orig.sort_values(by='prob_over', ascending=False).reset_index(drop=True)
-
-        avg_choices = fill_choices_dict(avg_choices, preds_avg)
-        final_ens_choices = fill_choices_dict(final_ens_choices, preds)
-        orig_choices = fill_choices_dict(orig_choices, preds_orig)
-
-    final_ens = aggregate_choices(final_ens_choices)
-    orig_ch = aggregate_choices(orig_choices)
-    avg_choices = aggregate_choices(avg_choices)
-
-    final_ens = format_choices_output(final_ens, ens_vers, rank_order='stack_model', val_greater=val_greater, val_less=val_less, wt_col=wt_col,
-                                        decimal_cut_greater=decimal_cut_greater, decimal_cut_less=decimal_cut_less, include_under=include_under,
-                                        game_dates=game_dates)
-    orig_ch = format_choices_output(orig_ch, ens_vers, rank_order='original', val_greater=val_greater, val_less=val_less, wt_col=wt_col,
-                                        decimal_cut_greater=decimal_cut_greater, decimal_cut_less=decimal_cut_less, include_under=include_under,
-                                        game_dates=game_dates)
-    avg_choices = format_choices_output(avg_choices, ens_vers, rank_order='avg', val_greater=val_greater, val_less=val_less, wt_col=wt_col,
-                                        decimal_cut_greater=decimal_cut_greater, decimal_cut_less=decimal_cut_less, include_under=include_under,
-                                        game_dates=game_dates)
-
-    include_under_q = np.where(include_under, 1, 0)
-    wt_col_q = np.where(wt_col is None, 'IS NULL', f"='{wt_col}'")
-
-    del_str = f'''value_cut_greater='{val_greater}'
-                AND value_cut_less='{val_less}'
-                AND wt_col {wt_col_q}
-                AND decimal_cut_greater='{decimal_cut_greater}'
-                AND decimal_cut_less='{decimal_cut_less}'
-                AND include_under={include_under_q}
-                AND ens_vers = '{ens_vers}'
-            '''
-
-    dm.delete_from_db('Simulation', 'Over_Probability_Choices', del_str, create_backup=False)
-    dm.write_to_db(final_ens,'Simulation', 'Over_Probability_Choices', 'append', create_backup=False)
-    dm.write_to_db(orig_ch,'Simulation', 'Over_Probability_Choices', 'append', create_backup=False)
-    dm.write_to_db(avg_choices,'Simulation', 'Over_Probability_Choices', 'append', create_backup=False)
-
-    
-    if not os.path.exists(save_path):
-        os.makedirs(save_path)
-    save_pickle(trial_obj, save_path, ens_vers)
-
-else:
-    final_ens = aggregate_choices(final_ens_choices)
-    orig_ch = aggregate_choices(orig_choices)
-    avg_choices = aggregate_choices(avg_choices)
-
- #%%
 
 from sklearn.linear_model import ElasticNet
 from lightgbm import LGBMRegressor

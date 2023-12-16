@@ -808,6 +808,24 @@ def remove_bad_models(model_obj, run_params, alpha, func_params, model_list):
     return model_list, func_params
 
 
+def remove_low_preds(predictions, stack_val_pred, model_list, scores):
+    # auto remove any predictions that are negative or 0
+    good_col = []
+    good_idx = []
+
+    for i, col in enumerate(predictions.columns):
+        if predictions[col].mean() > 0:
+            good_col.append(col)
+            good_idx.append(i)
+
+    predictions = predictions[good_col]
+    stack_val_pred = stack_val_pred[good_col]
+    model_list = list(np.array(model_list)[good_idx])
+    scores = list(np.array(scores)[good_idx])
+
+    return predictions, stack_val_pred, model_list, scores
+
+
 def load_run_models(run_params, X_stack, y_stack, X_predict, model_obj, alpha=None, is_parlay=False):
     
     if is_parlay: model_obj_label = 'is_parlay'
@@ -852,19 +870,8 @@ def load_run_models(run_params, X_stack, y_stack, X_predict, model_obj, alpha=No
     X_predict = X_predict[X_stack.columns]
     predictions = stack_predictions(X_predict, best_models, model_list, model_obj=model_obj)
 
-    # auto remove any predictions that are negative or 0
-    good_col = []
-    good_idx = []
-
-    for i, col in enumerate(predictions.columns):
-        if predictions[col].mean() > 0:
-            good_col.append(col)
-            good_idx.append(i)
-
-    predictions = predictions[good_col]
-    stack_val_pred = stack_val_pred[good_col]
-    model_list = list(np.array(model_list)[good_idx])
-    scores = list(np.array(scores)[good_idx])
+    if alpha==0.25 and run_params['cur_metric']=='blocks': pass
+    else: predictions, stack_val_pred, model_list, scores = remove_low_preds(predictions, stack_val_pred, model_list, scores)
 
     best_val, best_predictions, _ = average_stack_models(scores, model_list, y_stack, stack_val_pred, 
                                                          predictions, model_obj=model_obj, 
@@ -998,10 +1005,10 @@ run_params = {
 
     # set version and iterations
     'pred_vers': 'mse1_brier1',
-    'stack_model': 'random_kbest',
-    'stack_model_class': 'random_kbest',
-    # 'stack_model': 'random_full_stack',
-    # 'stack_model_class': 'random_full_stack',
+    # 'stack_model': 'random_kbest',
+    # 'stack_model_class': 'random_kbest',
+    'stack_model': 'random_full_stack',
+    'stack_model_class': 'random_full_stack',
     # 'stack_model': 'random_full_stack_ind_cats',
     # 'stack_model_class': 'random_full_stack_ind_cats',
     'parlay': False,
@@ -1112,13 +1119,17 @@ teams.year = teams.year.apply(lambda x: int(x.replace('-', '')))
 #                             ['2023-12-07', '2023-12-01'],
 #                             ['2023-12-08', '2023-12-01'],
 #                             ['2023-12-09', '2023-12-01'],
-#                             ]:
+                            # ['2023-12-11', '2023-12-01'],
+                            # ['2023-12-12', '2023-12-01'],
+                            # ['2023-12-13', '2023-12-01'],
+                            # ['2023-12-14', '2023-12-01'],
+                            # ]:
     
-#     run_params['train_date'] = int(tr_date.replace('-', ''))
-#     run_params['test_time_split'] = int(te_date.replace('-', ''))
+    # run_params['train_date'] = int(tr_date.replace('-', ''))
+    # run_params['test_time_split'] = int(te_date.replace('-', ''))
 
 individual_cats = {}
-for metric in run_params['metrics'][8:]:
+for metric in run_params['metrics']:
 
     # load data and filter down
     pkey, model_output_path = create_pkey_output_path(metric, run_params)
@@ -1417,7 +1428,31 @@ test_date = run_params['test_time_split']
 ens_vers = run_params['class_ens_vers']
 
 query_cuts = {
-    
+
+    'yes_under_high_cut': {
+
+        # determined using iterative modeling starting from stack_model, include_under=1, start_spot<=1
+        'decimal_cut_greater': '>0',
+        'decimal_cut_less': '<=3',
+        'val_greater': '>4.5',
+        'val_less': '<40',
+        'wt_col': 'decimal_odds_twomax',
+        'include_under': True,
+        'stack_model': True
+    },
+
+    'yes_under_low_cut': {
+
+        #  determined using iterative modeling starting from stack_model, include_under=0, num_choices <= 4
+        'decimal_cut_greater': '>0',
+        'decimal_cut_less': '<=3',
+        'val_greater': '>1.5',
+        'val_less': '<40',
+        'wt_col': 'decimal_odds_twomax',
+        'include_under': True,
+        'stack_model': True
+    },
+
     'no_under_high_cut': {
 
         #  determined using iterative modeling starting from stack_model, include_under=0
@@ -1430,25 +1465,13 @@ query_cuts = {
         'stack_model': True
     },
 
-    'yes_under_high_cut': {
-
-        # determined using iterative modeling starting from stack_model, include_under=1, start_spot<=1
-        'decimal_cut_greater': '>0',
-        'decimal_cut_less': '<=3',
-        'val_greater': '>4.5',
-        'val_less': '<100',
-        'wt_col': 'decimal_odds_twomax',
-        'include_under': True,
-        'stack_model': True
-    },
-
     'no_under_low_cut': {
 
-        #  determined using iterative modeling starting from stack_model, include_under=0, num_choices <= 4
+        #  determined using iterative modeling starting from stack_model, include_under=0
         'decimal_cut_greater': '>0',
         'decimal_cut_less': '<=2.3',
         'val_greater': '>1.5',
-        'val_less': '<50',
+        'val_less': '<20',
         'wt_col': 'decimal_odds_twomax',
         'include_under': False,
         'stack_model': True
@@ -1482,7 +1505,7 @@ for cut_name, cut_dict in query_cuts.items():
     orig_predict = dm.read(q, 'Simulation')
     orig_predict = orig_predict[orig_predict.game_date==test_date]
     if include_under:
-        orig_predict = flip_probs(orig_predict)
+        orig_predict = flip_probs(orig_predict, pred_col='prob_over')
 
     if not stack_model:
         display(orig_predict.sort_values(by='prob_over', ascending=False).iloc[:50])
@@ -1503,9 +1526,9 @@ for cut_name, cut_dict in query_cuts.items():
         model_obj = 'class'
         final_m = 'lr_c'
         skm, _, _ = get_skm(pd.concat([X_train, y_train], axis=1), model_obj, to_drop=[])
-        pipe, params = get_full_pipe(skm, final_m, stack_model=run_params['stack_model'], alpha=None, 
+        pipe, params = get_full_pipe(skm, final_m, stack_model='random_kbest', alpha=None, 
                                     min_samples=10, bayes_rand=run_params['opt_type'])
-
+        params['random_sample__frac'] = hp.uniform('frac', 0.5, 1)
         best_model, stack_scores, stack_pred, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
                                                                         n_iter=10, alpha=None, wt_col=wt_col,
                                                                         trials=trials_obj, bayes_rand=run_params['opt_type'],
@@ -1591,15 +1614,24 @@ def run_past_choices(ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_c
             model_obj = 'class'
             final_m = 'lr_c'
             skm, _, _ = get_skm(pd.concat([X_train, y_train], axis=1), model_obj, to_drop=[])
-            pipe, params = get_full_pipe(skm, final_m, stack_model=run_params['stack_model'], alpha=None, 
-                                        min_samples=10, bayes_rand=run_params['opt_type'])
+            pipe, params = get_full_pipe(skm, final_m, stack_model='random_kbest', alpha=None, 
+                                    min_samples=10, bayes_rand=run_params['opt_type'])
+            params['random_sample__frac'] = hp.uniform('frac', 0.5, 1)
             
-            best_model, _, _, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
-                                                        n_iter=num_trials, alpha=None, wt_col=wt_col,
-                                                        trials=trial_obj, bayes_rand=run_params['opt_type'],
-                                                        run_adp=False, print_coef=False,
-                                                        proba=True, num_k_folds=run_params['num_k_folds'],
-                                                        random_state=(i*2)+(i*7))
+            try:
+                best_model, _, _, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
+                                                            n_iter=num_trials, alpha=None, wt_col=wt_col,
+                                                            trials=trial_obj, bayes_rand=run_params['opt_type'],
+                                                            run_adp=False, print_coef=False,
+                                                            proba=True, num_k_folds=run_params['num_k_folds'],
+                                                            random_state=(i*2)+(i*7))
+            except:
+                best_model, _, _, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
+                                                            n_iter=num_trials, alpha=None, wt_col=wt_col,
+                                                            trials=Trials(), bayes_rand=run_params['opt_type'],
+                                                            run_adp=False, print_coef=False,
+                                                            proba=True, num_k_folds=run_params['num_k_folds'],
+                                                            random_state=(i*2)+(i*7))
 
             for c in X_train.columns:
                 if c not in X_test.columns:
@@ -1683,7 +1715,7 @@ model_obj = 'class'
 alpha=None
 run_params['cur_metric'] = 'points'
 
-ens_vers = 'random_full_stack_ind_cats_matt0_brier1_include2_kfold3'#run_params['class_ens_vers']
+ens_vers = 'random_full_stack_matt0_brier1_include2_kfold3'#run_params['class_ens_vers']
 print(ens_vers)
 past_runs = get_past_runs(ens_vers)
 
@@ -1715,9 +1747,12 @@ import shap
 
 choice_params = dm.read('''SELECT * 
                            FROM Over_Probability_Choices
-                           WHERE num_choices <= 3
-                                 AND rank_order='stack_model'
-                                
+                           WHERE num_choices = 4
+                                 AND start_spot <= 3
+                                 AND rank_order = 'stack_model'
+                                 AND include_under=0
+                                 AND value_cut_greater='>1.5'
+                                  
                            ''', 'Simulation')
 X = choice_params.drop('winnings', axis=1)
 for c in X.columns:

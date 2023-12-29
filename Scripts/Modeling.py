@@ -651,7 +651,7 @@ scores = load_pickle(model_output_path, 'all_param_scores')
 scores['reg_gbm'].sort_values(by='score').head(20)
 #%%
 
-metric = 'points'
+metric = 'points_rebounds'
 
 # load data and filter down
 pkey, model_output_path = create_pkey_output_path(metric, run_params, vers)
@@ -671,39 +671,45 @@ df_train_diff, df_predict_diff = get_over_under_class(df, metric, run_params, mo
 # set up blank dictionaries for all metrics
 out_reg, out_quant, out_class, out_diff = output_dict(),  output_dict(), output_dict(), output_dict()
 
-cur_df = df_train_class.copy()
+cur_df = df_train.copy()
 model_obj = 'reg'
-model_name = 'gbm'
+model_name = 'mlp'
 out_dict={}
 alpha=None
 i=50
 
 skm, X, y = get_skm(cur_df, model_obj, to_drop=run_params['drop_cols'])
-pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples)
+pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples, bayes_rand='bayes')
 
 if model_obj == 'class': proba = True
 else: proba = False
 
 print(f'\n{model_name}\n============\n')
 
-skm, X, y = get_skm(cur_df, model_obj, to_drop=run_params['drop_cols'])
-pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples)
-
-if model_obj == 'class': proba = True
-else: proba = False
-
 # fit and append the ADP model
 import time
 start = time.time()
-best_models, oof_data, _, _ = skm.time_series_cv(pipe, X, y, params, n_iter=run_params['n_iters'], 
+best_models, oof_data, _, trials = skm.time_series_cv(pipe, X, y, params, n_iter=10, trials=Trials(),
                                                 n_splits=run_params['n_splits'], col_split='game_date', 
-                                                bayes_rand='rand', time_split=run_params['cv_time_input'],
+                                                bayes_rand='bayes', time_split=run_params['cv_time_input'],
                                                 proba=proba, random_seed=(i+7)*19+(i*12)+6, alpha=alpha)
 
 print('Time Elapsed:', np.round((time.time()-start)/60,1), 'Minutes')
 
-col_label = str(alpha)
-out_dict = update_output_dict(model_obj, model_name, col_label, out_dict, oof_data, best_models)
+# col_label = str(alpha)
+# out_dict = update_output_dict(model_obj, model_name, col_label, out_dict, oof_data, best_models)
+
+#%%
+
+all_df = pd.DataFrame()
+for i in range(50):
+    cur_param = pd.DataFrame(trials.trials[i]['misc']['vals'])
+    cur_loss = pd.DataFrame({'loss': trials.trials[i]['result']['loss']}, index=[0])
+    cur = pd.concat([cur_param, cur_loss], axis=1)
+    all_df = pd.concat([all_df, cur], axis=0)
+
+all_df = all_df.sort_values(by='loss').reset_index(drop=True)
+all_df
 
 #%%
 pipeline = best_models[1]

@@ -43,22 +43,22 @@ verbosity=50
 run_params = {
     
     # set year and week to analyze
-    'cv_time_input': '2023-11-01',
-    'train_time_split': '2023-12-01',
+    'cv_time_input_back_days': 35,
+    'train_time_split': '2023-12-29',
     'metrics': [
-                # 'points', 'assists', 'rebounds',
-                # 'three_pointers','points_assists', 'points_rebounds',
-                'points_rebounds_assists', 'assists_rebounds',
+                #  'points', 'assists', 'rebounds',
+                #  'three_pointers','points_assists',
+                 'points_rebounds','points_rebounds_assists', 'assists_rebounds',
                 'steals_blocks','blocks', 'steals', 
                 # 'total_points', 'spread'  
                 ],
-    'n_iters': 20,
-    'n_splits': 5,
+    'n_iters': 15,
+    'n_splits': 4,
     'parlay': False,
     'opt_type': 'bayes'
 }
 
-run_params['cv_time_input'] = int(run_params['cv_time_input'].replace('-', ''))
+# run_params['cv_time_input'] = int(run_params['cv_time_input'].replace('-', ''))
 run_params['train_time_split'] = int(run_params['train_time_split'].replace('-', ''))
 
 # set weights for running model
@@ -390,8 +390,8 @@ def get_full_pipe(skm, m, alpha=None, stack_model=False, min_samples=10, bayes_r
     if m in ('gbm', 'gbm_c', 'gbm_q'):
         params[f'{m}__n_estimators'] = scope.int(hp.quniform('n_estimators', 20, 50, 2))
         params[f'{m}__max_depth'] = scope.int(hp.quniform('max_depth', 2, 12, 2))
-        params[f'{m}__max_features'] = hp.uniform('max_features', 0.5, 0.85)
-        params[f'{m}__subsample'] = hp.uniform('subsample', 0.5, 0.85)
+        params[f'{m}__max_features'] = hp.uniform('max_features', 0.4, 0.8)
+        params[f'{m}__subsample'] = hp.uniform('subsample', 0.4, 0.8)
     
     return pipe, params
 
@@ -570,6 +570,10 @@ for metric in run_params['metrics']:
     # load data and filter down
     pkey, model_output_path = create_pkey_output_path(metric, run_params, vers)
     df, run_params = load_data(run_params)
+    
+    game_dates = df.game_date.sort_values(ascending=False).unique()
+    run_params['cv_time_input'] = game_dates[run_params['cv_time_input_back_days']]
+
     run_params['cur_metric'] = metric
     df = remove_low_counts(df)
     df = create_y_act(df, metric)
@@ -619,31 +623,115 @@ for metric in run_params['metrics']:
 
 #%%
 
-jj = 0
-for m, label, df, model_obj, i, min_samples, alpha, n_iter in reversed(func_params):
-    if jj > 1: break
+for m, label, df, model_obj, i, min_samples, alpha, n_iter in func_params[-1:]:
+
     model_name = m
     print(model_name)
     cur_df = df.copy()
-    try:
-        best_models, oof_data, param_scores, trials = get_model_output(m, label, df, model_obj, run_params, i, min_samples, alpha, n_iter=n_iter)
-    except:
-        print(model_name, 'failed')
-    # bayes_rand = run_params['opt_type']
-    # proba = get_proba(model_obj)
-    # trials = get_trials(label, model_name, bayes_rand)
-    jj += 1
-    # skm, X, y = get_skm(cur_df, model_obj, to_drop=run_params['drop_cols'])
-    # pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples, bayes_rand=bayes_rand)
-    # if trials is not None: trials = update_trials_params(trials, model_name, params, pipe)
 
-    # # fit and append the ADP model
-    # start = time.time()
-    # best_models, oof_data, param_scores, trials = skm.time_series_cv(pipe, X, y, params, n_iter=20, 
-    #                                                                  n_splits=run_params['n_splits'], col_split='game_date', 
-    #                                                                  time_split=run_params['cv_time_input'],
-    #                                                                  bayes_rand=bayes_rand, proba=proba, trials=trials,
-    #                                                                  random_seed=(i+7)*19+(i*12)+6, alpha=alpha)
+    bayes_rand = run_params['opt_type']
+    proba = get_proba(model_obj)
+    trials = get_trials(label, model_name, bayes_rand)
+    
+    skm, X, y = get_skm(cur_df, model_obj, to_drop=run_params['drop_cols'])
+    pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples, bayes_rand=bayes_rand)
+    if trials is not None: trials = update_trials_params(trials, model_name, params, pipe)
+
+    # fit and append the ADP model
+    start = time.time()
+    best_models, oof_data, param_scores, trials = skm.time_series_cv(pipe, X, y, params, n_iter=20, 
+                                                                     n_splits=run_params['n_splits'], col_split='game_date', 
+                                                                     time_split=run_params['cv_time_input'],
+                                                                     bayes_rand=bayes_rand, proba=proba, trials=trials,
+                                                                     random_seed=(i+7)*19+(i*12)+6, alpha=alpha)
+#%%
+
+col_split = 'game_date'
+time_split = run_params['cv_time_input']
+n_splits = run_params['n_splits']
+random_seed = 1
+
+X_labels = skm.data[['player', 'team', 'week', 'year', 'y_act']].copy()
+folds = skm.get_fold_data(X, y, X_labels, time_col=col_split, val_cut=time_split, 
+                            n_splits=n_splits, random_state=random_seed)
+
+#%%
+hold_results = pd.DataFrame()
+val_results = pd.DataFrame()
+param_scores = pd.DataFrame()
+best_models = []
+i_seed = 5
+for fold in range(n_splits):
+
+    print('-----------------')
+
+    # get the train and holdout data
+    X_train, y_train, X_hold, y_hold, X_val_labels, X_hold_labels = self.unpack_fold(folds, fold)
+    cv_time_train = self.cv_time_splits(X_train, 'game_date', time_split)
+    cv_time_hold = self.cv_time_splits(X_hold, 'game_date', time_split)
+
+    fit_params = self.weight_params(model, y_train, sample_weight)
+    
+    if scoring is None and self.model_obj=='reg': scoring = self.scorer('sera')
+    elif scoring is None and self.model_obj=='class': scoring = self.scorer('brier')
+    elif scoring is None and self.model_obj=='quantile': scoring = self.scorer('pinball', **{'alpha': alpha})
+
+    self.X_train = X_train
+    self.y_train = y_train
+    self.X_hold = X_hold
+    self.y_hold = y_hold
+    self.cv_time_train = cv_time_train
+    self.cv_time_hold = cv_time_hold
+    self.proba=proba
+    self.randseed = random_seed * i_seed
+    self.alpha = alpha
+    self.trials = trials
+    np.random.seed(self.randseed)
+
+    if bayes_rand == 'bayes':
+        best_model, param_scores = self.custom_bayes_search(model, params, n_iter)
+    
+    elif bayes_rand == 'rand':
+        best_model, ps = self.custom_rand_search(model, params, n_iters=n_iter)
+        param_scores = pd.concat([param_scores, ps], axis=0)
+
+    
+    best_models.append(clone(best_model))
+    val_pred, hold_pred = self.cv_predict_time_holdout(best_model, sample_weight)
+    
+    val_wts, hold_wts = self.metrics_weights(self.get_y_val(), y_hold, sample_weight)
+    y_val = self.get_y_val()
+    
+    _ = self.test_scores(y_val, val_pred, val_wts, label='Val')
+    print('---')
+    _ = self.test_scores(y_hold, hold_pred, hold_wts)
+
+    hold_results_cur = pd.Series(hold_pred, name='pred')
+    hold_results_cur = pd.concat([X_hold_labels, hold_results_cur], axis=1)
+    hold_results = pd.concat([hold_results, hold_results_cur], axis=0)
+
+    val_results_cur = pd.Series(val_pred, name='pred')
+    val_results_cur = pd.concat([X_val_labels, val_results_cur], axis=1)
+    val_results = pd.concat([val_results, val_results_cur], axis=0)
+
+    i_seed += 1
+
+print('\nOverall\n==============')
+val_wts, hold_wts = self.metrics_weights(val_results.y_act.values, hold_results.y_act.values, sample_weight)
+
+val_score = self.test_scores(val_results.y_act, val_results.pred, val_wts, label='Val')
+print('---')
+hold_score = self.test_scores(hold_results.y_act, hold_results.pred, hold_wts, label='Test')
+
+oof_data = {
+    'scores': [np.round(val_score,3), np.round(hold_score,3)],
+    'full_val': val_results, 
+    'full_hold': hold_results, 
+    'hold': hold_results.pred.values,
+    'actual': hold_results.y_act.values
+    }
+
+gc.collect()    
 
 #%%
 

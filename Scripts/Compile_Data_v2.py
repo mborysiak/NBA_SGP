@@ -664,8 +664,9 @@ max_date = dm.read("SELECT max(game_date) FROM FantasyData", 'Player_Stats').val
 df = fantasy_data()
 
 if train_date == '2023-12-29':
+    days_since_training = (dt.datetime.now() - dt.datetime.strptime('2023-12-29', '%Y-%m-%d')).days
     game_dates = df.game_date.sort_values(ascending=False).unique()
-    df = df[df.game_date.isin(game_dates[:100])].reset_index(drop=True)
+    df = df[df.game_date.isin(game_dates[:100+days_since_training])].reset_index(drop=True)
 
 df = fantasy_pros(df)
 df = numberfire(df)

@@ -30,7 +30,7 @@ warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
 
 root_path = ffgeneral.get_main_path('NBA_SGP')
 db_path = f'{root_path}/Data/'
-dm = DataManage(db_path, timeout=30)
+dm = DataManage(db_path, timeout=100)
 
 pd.set_option('display.max_rows', 200)
 pd.set_option('display.max_columns', None)
@@ -179,6 +179,7 @@ def get_full_pipe(skm, m, alpha=None, stack_model=False, min_samples=10, bayes_r
 
     if stack_model=='random_full_stack' and run_params['opt_type']=='bayes': 
         params['random_sample__frac'] = hp.uniform('random_sample__frac', 0.5, 1)
+
     elif stack_model=='random_full_stack' and run_params['opt_type']=='rand':
         params['random_sample__frac'] = np.arange(0.5, 1, 0.05)
 
@@ -819,7 +820,7 @@ def remove_low_preds(predictions, stack_val_pred, model_list, scores):
     
     print(mean_checks)
     models_pre = mean_checks.index
-    for cut in np.arange(0.15, 2, 0.1):
+    for cut in np.arange(0.2, 2, 0.2):
         mean_checks_idx = mean_checks[abs(mean_checks.pct_diff) <= cut].index
         if len(mean_checks_idx) >= run_params['min_include']: break
 
@@ -994,8 +995,8 @@ def create_metric_split_columns_stack(df, metric, individual_cats):
 run_params = {
     
     # set year and week to analyze
-    'last_train_date_orig': '2023-11-11',
-    'train_date_orig': '2023-12-01',
+    'last_train_date_orig': '2023-12-01',
+    'train_date_orig': '2023-12-29',
     'test_time_split_orig': dt.date.today().strftime('%Y-%m-%d'),
 
     'metrics':  [
@@ -1122,23 +1123,36 @@ teams.year = teams.year.apply(lambda x: int(x.replace('-', '')))
 #                             # ['2023-11-28', '2023-11-11'],
 #                             # ['2023-11-29', '2023-11-11'],
 #                             # ['2023-11-30', '2023-11-11'],
-#                             ['2023-12-01', '2023-12-01'],
-#                             ['2023-12-02', '2023-12-01'],
-#                             ['2023-12-04', '2023-12-01'],
-#                             ['2023-12-05', '2023-12-01'],
-#                             ['2023-12-06', '2023-12-01'],
-#                             ['2023-12-07', '2023-12-01'],
-#                             ['2023-12-08', '2023-12-01'],
-#                             ['2023-12-09', '2023-12-01'],
-#                             ['2023-12-11', '2023-12-01'],
-#                             ['2023-12-12', '2023-12-01'],
-#                             ['2023-12-13', '2023-12-01'],
-#                             ['2023-12-14', '2023-12-01'],
-#                             ['2023-12-15', '2023-12-01'],
-#                             ['2023-12-16', '2023-12-01'],
-#                             ['2023-12-17', '2023-12-01'],
-#                             ['2023-12-18', '2023-12-01'],
+#                             # ['2023-12-01', '2023-12-01'],
+#                             # ['2023-12-02', '2023-12-01'],
+#                             # ['2023-12-04', '2023-12-01'],
+#                             # ['2023-12-05', '2023-12-01'],
+#                             # ['2023-12-06', '2023-12-01'],
+#                             # ['2023-12-07', '2023-12-01'],
+#                             # ['2023-12-08', '2023-12-01'],
+#                             # ['2023-12-09', '2023-12-01'],
+#                             # ['2023-12-11', '2023-12-01'],
+#                             # ['2023-12-12', '2023-12-01'],
+#                             # ['2023-12-13', '2023-12-01'],
+#                             # ['2023-12-14', '2023-12-01'],
+#                             # ['2023-12-15', '2023-12-01'],
+#                             # ['2023-12-16', '2023-12-01'],
+#                             # ['2023-12-17', '2023-12-01'],
+#                             # ['2023-12-18', '2023-12-01'],
 #                             ['2023-12-19', '2023-12-01'],
+#                             ['2023-12-20', '2023-12-01'],
+#                             ['2023-12-21', '2023-12-01'],
+#                             ['2023-12-22', '2023-12-01'],
+#                             ['2023-12-23', '2023-12-01'],
+#                             ['2023-12-25', '2023-12-01'],
+#                             ['2023-12-26', '2023-12-01'],
+#                             ['2023-12-27', '2023-12-01'],
+#                             ['2023-12-28', '2023-12-01'],
+#                             ['2023-12-29', '2023-12-01'],
+#                             ['2023-12-30', '2023-12-29'],
+#                             ['2023-12-31', '2023-12-29'],
+#                             ['2024-01-01', '2023-12-29'],
+#                             ['2024-01-02', '2023-12-29'],
 
 #                             ]:
     
@@ -1447,9 +1461,15 @@ def pull_game_dates(q):
 #=============
 
 def remove_combo_stats(pred_df, prob_col):
-    pred_df = pred_df[(~pred_df.metric.str.contains('_')) | (pred_df.metric=='three_pointers')].reset_index(drop=True)
+    pred_df = pred_df[(~pred_df.metric.str.contains('_') | (pred_df.metric=='three_pointers'))].reset_index(drop=True)
     pred_df = pred_df.sort_values(by=prob_col, ascending=False).reset_index(drop=True)
     return pred_df
+
+def remove_threes_df(pred_df, prob_col):
+    pred_df = pred_df[(pred_df.metric!='three_pointers')].reset_index(drop=True)
+    pred_df = pred_df.sort_values(by=prob_col, ascending=False).reset_index(drop=True)
+    return pred_df
+
 
 def get_max_pred(pred_df, grp_col, prob_col):
     
@@ -1483,10 +1503,12 @@ def get_top_matchups(preds, prob_col, num_players=5):
 # Choice and Winnings Functions
 #=================
 
-def top_sgp_choices(cur_lbl, df, prob_col, choices, matchup_rank, num_matchups, remove_combos):
+def top_sgp_choices(cur_lbl, df, prob_col, choices, matchup_rank, num_matchups, remove_combos, remove_threes):
   
     if remove_combos: df = remove_combo_stats(df, prob_col)
     else: df = get_max_pred(df, 'player', prob_col)
+
+    if remove_threes: df = remove_threes_df(df, prob_col)
     
     df = get_game_mapping(df)
     top_matchups = get_top_matchups(df, prob_col, num_players=5)
@@ -1498,9 +1520,12 @@ def top_sgp_choices(cur_lbl, df, prob_col, choices, matchup_rank, num_matchups, 
 
     return df, choices
 
-def top_all_choices(df, prob_col, all_label, choices, remove_combos):
+def top_all_choices(df, prob_col, all_label, choices, remove_combos, remove_threes):
     if remove_combos: df = remove_combo_stats(df, prob_col)
     else: df = get_max_pred(df, 'player', prob_col)
+
+    if remove_threes: df = remove_threes_df(df, prob_col)
+
     choices[all_label] = fill_choices_dict(choices[all_label], df)
     return df, choices
 
@@ -1509,15 +1534,16 @@ def calc_all_sgp_winnings(prob_types, prob_dfs, prob_cols, choices):
     # calculate winnings from various sgp choices
     for prob_type, prob_df, prob_col in zip(prob_types, prob_dfs, prob_cols):
         for remove_combos in [True, False]:
-            all_label = f'all_{prob_type}_{remove_combos}'
-            if all_label not in choices.keys(): choices[all_label] = get_choices_dict()
-            _, choices = top_all_choices(prob_df, prob_col, all_label, choices, remove_combos)
-            
-            for matchup_rank in [0, 1, 2]:
-                for num_matchups in [1, 2, 3]:
-                    cur_lbl = f'{prob_type}_{remove_combos}_{matchup_rank}_{num_matchups}'
-                    if cur_lbl not in choices.keys(): choices[cur_lbl] = get_choices_dict()
-                    _, choices = top_sgp_choices(cur_lbl, prob_df, prob_col, choices, matchup_rank, num_matchups, remove_combos)
+            for remove_threes in [True, False]:
+                all_label = f'all_{prob_type}_{remove_combos}_{remove_threes}'
+                if all_label not in choices.keys(): choices[all_label] = get_choices_dict()
+                _, choices = top_all_choices(prob_df, prob_col, all_label, choices, remove_combos, remove_threes)
+                
+                for matchup_rank in [0, 1, 2]:
+                    for num_matchups in [1, 2, 3]:
+                        cur_lbl = f'{prob_type}_{remove_combos}_{remove_threes}_{matchup_rank}_{num_matchups}'
+                        if cur_lbl not in choices.keys(): choices[cur_lbl] = get_choices_dict()
+                        _, choices = top_sgp_choices(cur_lbl, prob_df, prob_col, choices, matchup_rank, num_matchups, remove_combos, remove_threes)
     return choices
 
 #==============
@@ -1544,68 +1570,75 @@ def format_choices_output(choice_df, ens_vers, rank_order, val_greater, val_less
 
 
 # save out all the various combinations by extracting from dictionary
-def save_sgp_results(choices, game_dates, val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, ens_vers):
+def save_sgp_results(tablename, choices, game_dates, val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, ens_vers):
     for prob_type in ['stack_model', 'original', 'avg']:
         for remove_combos in [True, False]:
-            for matchup_rank in [0, 1, 2]:
-                for num_matchups in [1, 2, 3]:
-                    cur_lbl = f'{prob_type}_{remove_combos}_{matchup_rank}_{num_matchups}'
-                    cur_result = aggregate_choices(choices[cur_lbl])
-                    cur_result = format_choices_output(cur_result, ens_vers, rank_order=prob_type, 
+            for remove_threes in [True, False]:
+                for matchup_rank in [0, 1, 2]:
+                    for num_matchups in [1, 2, 3]:
+                        cur_lbl = f'{prob_type}_{remove_combos}_{remove_threes}_{matchup_rank}_{num_matchups}'
+                        cur_result = aggregate_choices(choices[cur_lbl])
+                        cur_result = format_choices_output(cur_result, ens_vers, rank_order=prob_type, 
+                                                        val_greater=val_greater, val_less=val_less, wt_col=wt_col,
+                                                        decimal_cut_greater=decimal_cut_greater, decimal_cut_less=decimal_cut_less,
+                                                        include_under=include_under, game_dates=game_dates)
+                        cur_result = cur_result.assign(bet_type='sgp', matchup_rank=matchup_rank, num_matchups=num_matchups, 
+                                                       no_combos=remove_combos, remove_threes=remove_threes)
+
+                        include_under_q = np.where(include_under, 1, 0)
+                        wt_col_q = np.where(wt_col is None, 'IS NULL', f"='{wt_col}'")
+                        no_combos_q = np.where(remove_combos, 1, 0)
+                        remove_threes_q = np.where(remove_threes, 1, 0)
+                        
+                        del_str = f'''value_cut_greater='{val_greater}'
+                                    AND value_cut_less='{val_less}'
+                                    AND wt_col {wt_col_q}
+                                    AND decimal_cut_greater='{decimal_cut_greater}'
+                                    AND decimal_cut_less='{decimal_cut_less}'
+                                    AND include_under={include_under_q}
+                                    AND rank_order='{prob_type}'
+                                    AND ens_vers = '{ens_vers}'
+                                    AND bet_type='sgp'
+                                    AND matchup_rank={matchup_rank}
+                                    AND num_matchups={num_matchups}
+                                    AND no_combos={no_combos_q}
+                                    AND remove_threes={remove_threes_q}
+                                '''
+                        time.sleep(np.random.random()*5)
+                        dm.delete_from_db('Simulation', tablename, del_str, create_backup=False)
+                        dm.write_to_db(cur_result, 'Simulation', tablename, 'append', create_backup=False)
+
+def save_all_results(tablename, choices, game_dates, val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, ens_vers):
+    for prob_type in ['stack_model', 'original', 'avg']:
+        for remove_combos in [True, False]:
+            for remove_threes in [True, False]:
+                cur_result = aggregate_choices(choices[f'all_{prob_type}_{remove_combos}_{remove_threes}'])
+                cur_result = format_choices_output(cur_result, ens_vers, rank_order=prob_type, 
                                                     val_greater=val_greater, val_less=val_less, wt_col=wt_col,
                                                     decimal_cut_greater=decimal_cut_greater, decimal_cut_less=decimal_cut_less,
                                                     include_under=include_under, game_dates=game_dates)
-                    cur_result = cur_result.assign(bet_type='sgp', matchup_rank=matchup_rank, num_matchups=num_matchups, no_combos=remove_combos)
+                cur_result = cur_result.assign(bet_type='all', matchup_rank=np.nan, num_matchups=np.nan, no_combos=remove_combos, remove_threes=remove_threes)
 
-                    include_under_q = np.where(include_under, 1, 0)
-                    wt_col_q = np.where(wt_col is None, 'IS NULL', f"='{wt_col}'")
-                    no_combos_q = np.where(remove_combos, 1, 0)
-
-                    del_str = f'''value_cut_greater='{val_greater}'
-                                AND value_cut_less='{val_less}'
-                                AND wt_col {wt_col_q}
-                                AND decimal_cut_greater='{decimal_cut_greater}'
-                                AND decimal_cut_less='{decimal_cut_less}'
-                                AND include_under={include_under_q}
-                                AND rank_order='{prob_type}'
-                                AND ens_vers = '{ens_vers}'
-                                AND bet_type='sgp'
-                                AND matchup_rank={matchup_rank}
-                                AND num_matchups={num_matchups}
-                                AND no_combos={no_combos_q}
-                            '''
-                    time.sleep(np.random.random()*5)
-                    dm.delete_from_db('Simulation', 'Probability_Choices_SGP', del_str, create_backup=False)
-                    dm.write_to_db(cur_result, 'Simulation', 'Probability_Choices_SGP', 'append', create_backup=False)
-
-def save_all_results(choices, game_dates, val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, ens_vers):
-    for prob_type in ['stack_model', 'original', 'avg']:
-        for remove_combos in [True, False]:
-            cur_result = aggregate_choices(choices[f'all_{prob_type}_{remove_combos}'])
-            cur_result = format_choices_output(cur_result, ens_vers, rank_order=prob_type, 
-                                                val_greater=val_greater, val_less=val_less, wt_col=wt_col,
-                                                decimal_cut_greater=decimal_cut_greater, decimal_cut_less=decimal_cut_less,
-                                                include_under=include_under, game_dates=game_dates)
-            cur_result = cur_result.assign(bet_type='all', matchup_rank=np.nan, num_matchups=np.nan, no_combos=remove_combos)
-
-            include_under_q = np.where(include_under, 1, 0)
-            wt_col_q = np.where(wt_col is None, 'IS NULL', f"='{wt_col}'")
-            no_combos_q = np.where(remove_combos, 1, 0)
-            
-            del_str = f'''value_cut_greater='{val_greater}'
-                        AND value_cut_less='{val_less}'
-                        AND wt_col {wt_col_q}
-                        AND decimal_cut_greater='{decimal_cut_greater}'
-                        AND decimal_cut_less='{decimal_cut_less}'
-                        AND include_under={include_under_q}
-                        AND rank_order='{prob_type}'
-                        AND ens_vers = '{ens_vers}'
-                        AND bet_type='all'
-                        AND no_combos={no_combos_q}
-                    '''
-            
-            dm.delete_from_db('Simulation', 'Probability_Choices_SGP', del_str, create_backup=False)
-            dm.write_to_db(cur_result, 'Simulation', 'Probability_Choices_SGP', 'append', create_backup=False)
+                include_under_q = np.where(include_under, 1, 0)
+                wt_col_q = np.where(wt_col is None, 'IS NULL', f"='{wt_col}'")
+                no_combos_q = np.where(remove_combos, 1, 0)
+                remove_threes_q = np.where(remove_threes, 1, 0)
+                
+                del_str = f'''value_cut_greater='{val_greater}'
+                            AND value_cut_less='{val_less}'
+                            AND wt_col {wt_col_q}
+                            AND decimal_cut_greater='{decimal_cut_greater}'
+                            AND decimal_cut_less='{decimal_cut_less}'
+                            AND include_under={include_under_q}
+                            AND rank_order='{prob_type}'
+                            AND ens_vers = '{ens_vers}'
+                            AND bet_type='all'
+                            AND no_combos={no_combos_q}
+                            AND remove_threes={remove_threes_q}
+                        '''
+                
+                dm.delete_from_db('Simulation', tablename, del_str, create_backup=False)
+                dm.write_to_db(cur_result, 'Simulation', tablename, 'append', create_backup=False)
 
 #%%
 
@@ -1641,93 +1674,52 @@ def run_final_stack(X_train, y_train, cv_time_input, wt_col, bayes_rand, trials_
         
     return best_models, oof_data, X_train, y_train, param_scores, trials
 
+
 i=20
 test_date = run_params['test_time_split']
 ens_vers = run_params['class_ens_vers']
 
 query_cuts = {
-
-    'original_low_cut_yes_under': {
+    
+    'top_lgbm_under': {
         'decimal_cut_greater': '>0',
         'decimal_cut_less': '<=2.3',
         'val_greater': '>0.5',
-        'val_less': '<30',
+        'val_less': '<20',
         'wt_col': None,
         'include_under': True,
         'stack_model': False,
-          'bet_type': 'all'
+        'no_combos': True,
+        'bet_type': 'sgp',
+        'remove_threes': True
     },
 
-    'original_low_cut_yes_under_sgp': {
+    'top_lgbm_over': {
         'decimal_cut_greater': '>0',
         'decimal_cut_less': '<=2.3',
-        'val_greater': '>0.5',
-        'val_less': '<30',
-        'wt_col': None,
-        'include_under': True,
-        'stack_model': False,
-        'bet_type': 'sgp'
-    },
-
-    'original_low_cut_no_under': {
-        'decimal_cut_greater': '>0',
-        'decimal_cut_less': '<=3',
-        'val_greater': '>0',
+        'val_greater': '>1.5',
         'val_less': '<20',
         'wt_col': None,
         'include_under': False,
         'stack_model': False,
+        'no_combos': True,
+        'remove_threes': True,
         'bet_type': 'all'
     },
 
+    'top_lgbm_stack': {
+        'decimal_cut_greater': '>0',
+        'decimal_cut_less': '<=2.3',
+        'val_greater': '>1.5',
+        'val_less': '<20',
+        'wt_col': None,
+        'include_under': False,
+        'stack_model': True,
+        'no_combos': False,
+        'remove_threes': False,
+        'bet_type': 'all'
+    },
 
-    #  'no_under_high_cut_decimal_odds': {
-
-    #     #  determined using iterative modeling starting from stack_model, include_under=0
-    #     'decimal_cut_greater': '>=1.7',
-    #     'decimal_cut_less': '<=2.3',
-    #     'val_greater': '>4.5',
-    #     'val_less': '<20',
-    #     'wt_col': 'decimal_odds',
-    #     'include_under': False,
-    #     'stack_model': True
-    # },
-
-    # 'no_under_low_cut': {
-
-    #     #  determined using iterative modeling starting from stack_model, include_under=0
-    #     'decimal_cut_greater': '>0',
-    #     'decimal_cut_less': '<=2.3',
-    #     'val_greater': '>1.5',
-    #     'val_less': '<50',
-    #     'wt_col': 'decimal_odds_twomax',
-    #     'include_under': False,
-    #     'stack_model': True
-    # },
-
-    # 'yes_under_high_cut': {
-
-    #     # determined using iterative modeling starting from stack_model, include_under=1, start_spot<=1
-    #     'decimal_cut_greater': '>0',
-    #     'decimal_cut_less': '<=3',
-    #     'val_greater': '>4.5',
-    #     'val_less': '<40',
-    #     'wt_col': 'decimal_odds_twomax',
-    #     'include_under': True,
-    #     'stack_model': True
-    # },
-
-    # 'yes_under_low_cut': {
-
-    #     #  determined using iterative modeling starting from stack_model, include_under=0, num_choices <= 4
-    #     'decimal_cut_greater': '>0',
-    #     'decimal_cut_less': '<=3',
-    #     'val_greater': '>1.5',
-    #     'val_less': '<40',
-    #     'wt_col': 'decimal_odds_twomax',
-    #     'include_under': True,
-    #     'stack_model': True
-    # },
 }
 
 for cut_name, cut_dict in query_cuts.items():
@@ -1740,6 +1732,8 @@ for cut_name, cut_dict in query_cuts.items():
     include_under = cut_dict['include_under']
     stack_model = cut_dict['stack_model']
     bet_type = cut_dict['bet_type']
+    no_combos = cut_dict['no_combos']
+    remove_threes = cut_dict['remove_threes']
 
     print('\n=======\n', val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, '\n=======\n')
 
@@ -1762,12 +1756,22 @@ for cut_name, cut_dict in query_cuts.items():
 
     if not stack_model:
         if bet_type=='all':
+            if no_combos: orig_predict = remove_combo_stats(orig_predict, 'prob_over')     
+            else: orig_predict = get_max_pred(orig_predict, 'player', 'prob_over')
+            
+            if remove_threes: orig_predict = remove_threes_df(orig_predict, 'prob_over')
+
             display(orig_predict.sort_values(by='prob_over', ascending=False).iloc[:50])
+
         else:
-            orig_predict = remove_combo_stats(orig_predict, 'prob_over')        
+            if no_combos: orig_predict = remove_combo_stats(orig_predict, 'prob_over')     
+            else: orig_predict = get_max_pred(orig_predict, 'player', 'prob_over')
+            if remove_threes: orig_predict = remove_threes_df(orig_predict, 'prob_over')
+
             orig_predict = get_game_mapping(orig_predict)
             top_matchups = get_top_matchups(orig_predict, 'prob_over', num_players=5)
             top_matchups = top_matchups[top_matchups.player >= 5]
+            
             print(top_matchups.iloc[0:3, 0])
             orig_predict = orig_predict[orig_predict.matchup.isin(top_matchups.iloc[0:3, 0])]
             orig_predict = orig_predict.sort_values(by='prob_over', ascending=False).reset_index(drop=True)
@@ -1987,11 +1991,11 @@ val_less_list = ['<100', '<50', '<40', '<30', '<20']
 iter_cats = list(set(itertools.product(wt_col_list, decimal_cut_greater_list, decimal_cut_less_list, include_under_list,
                                        val_greater_list, val_less_list)))
 
-out = Parallel(n_jobs=-1, verbose=50)(
-    delayed(run_past_choices)
-    (ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less) 
-    for wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less in iter_cats
-)
+# out = Parallel(n_jobs=-1, verbose=50)(
+#     delayed(run_past_choices)
+#     (ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less) 
+#     for wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less in iter_cats
+# )
 
 # for wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less in iter_cats[:1]:
 #     run_past_choices(ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less)
@@ -1999,7 +2003,7 @@ out = Parallel(n_jobs=-1, verbose=50)(
 #%%
 
 
-def run_past_choices_sgp(ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less):
+def run_past_choices_sgp(tablename, ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less):
 
     print('\n=======\n', val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, '\n=======\n')
 
@@ -2017,15 +2021,15 @@ def run_past_choices_sgp(ens_vers, past_runs, wt_col, decimal_cut_greater, decim
     save_path = create_save_path(decimal_cut_greater, decimal_cut_less, val_greater, val_less, wt_col, include_under, foldername='pick_choices_sgp')
     game_dates = pull_game_dates(q)
 
-    if save_path.split('/')[-1] in past_runs:
-        return
+    # if save_path.split('/')[-1] in past_runs:
+    #     return
 
-    else:
-        all_sgp_choices = get_choices_dict()
-        trial_obj = Trials()
-        game_dates = game_dates[3:]
-        num_trials = 52
-        num_back_days = 100
+    # else:
+    all_sgp_choices = get_choices_dict()
+    trial_obj = Trials()
+    game_dates = game_dates[3:]
+    num_trials = 52
+    num_back_days = 100
 
     if len(game_dates)>0:
         for test_date in game_dates:
@@ -2090,9 +2094,10 @@ def run_past_choices_sgp(ens_vers, past_runs, wt_col, decimal_cut_greater, decim
             prob_cols = ['final_pred', 'prob_over', 'avg_prob']
             
             all_sgp_choices = calc_all_sgp_winnings(prob_types, prob_dfs, prob_cols, all_sgp_choices)
+            print(all_sgp_choices)
             
-        save_sgp_results(all_sgp_choices, game_dates, val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, ens_vers)
-        save_all_results(all_sgp_choices, game_dates, val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, ens_vers)
+        save_sgp_results(tablename, all_sgp_choices, game_dates, val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, ens_vers)
+        save_all_results(tablename, all_sgp_choices, game_dates, val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, ens_vers)
 
         if not os.path.exists(save_path): os.makedirs(save_path)
         save_pickle(trial_obj, save_path, ens_vers)
@@ -2107,7 +2112,8 @@ model_obj = 'class'
 alpha=None
 run_params['cur_metric'] = 'points'
 
-ens_vers = 'random_kbest_matt0_brier1_include2_kfold3'
+tablename = 'Over_Probability_Choices'
+ens_vers = 'random_full_stack_matt0_brier1_include2_kfold3'
 print(ens_vers)
 past_runs = get_past_runs(ens_vers, sgp=True)
 
@@ -2123,23 +2129,140 @@ iter_cats = list(set(itertools.product(wt_col_list, decimal_cut_greater_list, de
 
 out = Parallel(n_jobs=-1, verbose=50)(
     delayed(run_past_choices_sgp)
-    (ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less) 
+    (tablename, ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less) 
     for wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less in iter_cats
 )
 
-# for wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less in iter_cats[2:3]:
+# for wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less in iter_cats[501:502]:
 #     run_past_choices_sgp(ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less)
 
 #%%
+i=20
+model_obj = 'class'
+alpha=None
+run_params['cur_metric'] = 'points'
 
+ens_vers = 'random_full_stack_matt0_brier1_include2_kfold3'
+print(ens_vers)
+past_runs = get_past_runs(ens_vers, sgp=True)
 
-# results = dm.read("SELECT * FROM Over_Probability_Choices", 'Simulation')
-# results['bet_type'] = 'all'
-# results['matchup_rank'] = 0
-# results['num_matchups'] = 7
-# results['no_combos'] = 0
+wt_col_list=[None, 'decimal_odds', 'decimal_odds_twomax']
+decimal_cut_greater_list = ['>0', '>=1.7']
+decimal_cut_less_list = ['<=2.3', '<=3', '<=2.3']
+include_under_list = [False, True]
+val_greater_list = ['>0', '>0.5' ,'>1.5', '>2.5', '>3.5', '>4.5']
+val_less_list = ['<100', '<50', '<40', '<30', '<20']
 
-# dm.write_to_db(results, 'Simulation', 'Over_Probability_Choices', 'replace', create_backup=True)
+# iter_cats = list(set(itertools.product(wt_col_list, decimal_cut_greater_list, decimal_cut_less_list, include_under_list,
+#                                        val_greater_list, val_less_list)))
+
+# wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less = iter_cats[501]
+
+wt_col = None
+decimal_cut_greater = '>0'
+decimal_cut_less = '<=2.3'
+include_under = True
+val_greater = '>0.5'
+val_less = '<20'
+
+print('\n=======\n', val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, '\n=======\n')
+
+q = f'''SELECT * 
+        FROM Over_Probability_New
+        WHERE value {val_greater}
+            AND value {val_less}
+            AND decimal_odds {decimal_cut_greater}
+            AND decimal_odds {decimal_cut_less}
+            AND ens_vers = '{ens_vers}'
+            AND y_act IS NOT NULL
+        ORDER BY game_date ASC
+        '''
+
+save_path = create_save_path(decimal_cut_greater, decimal_cut_less, val_greater, val_less, wt_col, include_under, foldername='pick_choices_sgp')
+game_dates = pull_game_dates(q)
+
+all_sgp_choices = get_choices_dict()
+trial_obj = Trials()
+game_dates = game_dates[3:]
+num_trials = 3
+num_back_days = 100
+
+if len(game_dates)>0:
+    for test_date in game_dates[-30:]:
+
+        num_trials = np.max([num_trials-2, 3])
+        num_back_days = np.max([num_back_days-1, 45])
+        print('Date:', test_date)
+
+        train_pred = dm.read(q, 'Simulation')
+        train_pred = train_pred.drop('y_act', axis=1).rename(columns={'y_act_prob': 'y_act'})
+        train_pred = get_date_info(train_pred)
+        train_pred = train_pred.dropna().reset_index(drop=True)
+        train_pred, test_pred, cv_time_input = train_split(train_pred, test_date=test_date, num_back_days=num_back_days)
+        
+        X_train = preprocess_X(train_pred, wt_col, cv_time_input)
+        X_test = preprocess_X(test_pred, wt_col, cv_time_input)
+        y_train = train_pred.y_act
+
+        model_obj = 'class'
+        final_m = 'lr_c'
+        skm, _, _ = get_skm(pd.concat([X_train, y_train], axis=1), model_obj, to_drop=[])
+        pipe, params = get_full_pipe(skm, final_m, stack_model='random_full_stack', alpha=None, 
+                                min_samples=10, bayes_rand=run_params['opt_type'])
+        params['random_sample__frac'] = hp.uniform('frac', 0.5, 1)
+        
+        try:
+            best_model, _, _, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
+                                                        n_iter=num_trials, alpha=None, wt_col=wt_col,
+                                                        trials=trial_obj, bayes_rand=run_params['opt_type'],
+                                                        run_adp=False, print_coef=False,
+                                                        proba=True, num_k_folds=run_params['num_k_folds'],
+                                                        random_state=(i*2)+(i*7))
+        except:
+            best_model, _, _, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
+                                                        n_iter=num_trials, alpha=None, wt_col=wt_col,
+                                                        trials=Trials(), bayes_rand=run_params['opt_type'],
+                                                        run_adp=False, print_coef=False,
+                                                        proba=True, num_k_folds=run_params['num_k_folds'],
+                                                        random_state=(i*2)+(i*7))
+
+        for c in X_train.columns:
+            if c not in X_test.columns:
+                X_test[c] = 0
+
+        X_test = X_test[X_train.columns]
+        best_model.fit(X_train, y_train)
+
+        preds_orig = test_pred.reset_index(drop=True).copy()
+        preds_stack = pd.Series(best_model.predict_proba(X_test)[:,1], name='final_pred')
+        preds_stack = pd.concat([preds_stack, preds_orig], axis=1)
+
+        preds_avg = preds_stack.copy()
+        preds_avg['avg_prob'] = preds_avg[['final_pred', 'prob_over']].mean(axis=1)
+
+        if include_under:
+            preds_orig = flip_probs(preds_orig, pred_col='prob_over')
+            preds_stack = flip_probs(preds_stack, pred_col='final_pred')
+            preds_avg = flip_probs(preds_avg, pred_col='avg_prob')
+
+        prob_types = ['stack_model', 'original', 'avg']
+        prob_dfs = [preds_stack, preds_orig, preds_avg]
+        prob_cols = ['final_pred', 'prob_over', 'avg_prob']
+        
+        all_sgp_choices = calc_all_sgp_winnings(prob_types, prob_dfs, prob_cols, all_sgp_choices)
+  
+display(aggregate_choices(all_sgp_choices['all_original_True_True']))
+display(aggregate_choices(all_sgp_choices['all_original_True_False']))
+display(aggregate_choices(all_sgp_choices['original_True_True_0_3']))
+display(aggregate_choices(all_sgp_choices['original_True_False_0_3']))
+
+#%%
+
+# results = dm.read("SELECT * FROM Probability_Choices_SGP", 'Simulation')
+# results['remove_threes'] = 0
+# results.loc[(results.no_combos==1) & (results.ens_vers=='random_full_stack_matt0_brier1_include2_kfold3'), 'remove_threes'] = 1
+
+# dm.write_to_db(results, 'Simulation', 'Probability_Choices_SGP', 'replace', create_backup=True)
 
 #%%
 
@@ -2157,16 +2280,7 @@ choice_params = dm.read('''SELECT *
                                 SELECT * 
                                 FROM Probability_Choices_SGP
                            ) 
-                           WHERE start_spot <= 2
-                                 AND num_choices >= 4
-                                 AND ens_vers = 'random_kbest_matt0_brier1_include2_kfold3'
-                             --    AND (matchup_rank = 0 OR matchup_rank IS NULL)
-                             --    AND (num_matchups=3 OR num_matchups IS NULL)
-                                 AND include_under=0
-                                 AND value_cut_greater = '>0'
-                                 AND decimal_cut_greater = '>0'
-                                 AND rank_order = 'original'
-                                 AND bet_type = 'all'
+                          
                         ''', 'Simulation')
 X = choice_params.drop('winnings', axis=1)
 for c in X.columns:
@@ -2179,6 +2293,96 @@ lr.fit(X,y)
 pd.Series(lr.coef_, index=X.columns).sort_values(ascending=False)
 
 #%%
+from lightgbm import LGBMRegressor
+
+choice_params = dm.read('''SELECT *
+                           FROM (
+                                SELECT * 
+                                FROM Probability_Choices_SGP
+                           ) 
+                          
+                        ''', 'Simulation')
+X = choice_params.drop('winnings', axis=1)
+y = choice_params.winnings
+
+for c in X.columns:
+    if X[c].dtypes=='object': X[c] = X[c].astype('category')
+
+lgbm = LGBMRegressor(n_jobs=-1)
+lgbm.fit(X,y)
+
+#%%
+
+
+def get_lgbm_pred(lgbm, X, X_pred, all_scores):
+    for c in X_pred.columns:
+        X_pred[c] = X_pred[c].astype(X[c].dtypes)
+    X_pred['score'] = lgbm.predict(X_pred)
+    all_scores = pd.concat([all_scores, X_pred], axis=0)
+    X_pred = X_pred.drop('score', axis=1)
+    return all_scores, X_pred
+
+all_scores = pd.DataFrame()
+X_pred = pd.DataFrame(X.iloc[0]).T
+
+for start_spot in range(2):
+    for num_choices in range(3, 7):
+        for ens_vers in ['random_full_stack_matt0_brier1_include2_kfold3', 'random_kbest_matt0_brier1_include2_kfold3']:
+            for value_cut_greater in ['>0', '>0.5', '>1.5', '>2.5']:
+                for value_cut_less in ['<20', '<30', '<40']:
+                    for decimal_cut_greater in ['>0', '>=1.7']:
+                        for decimal_cut_less in ['<=2.3', '<=3']:
+                            for rank_order in ['stack_model', 'avg', 'original']:
+                                    for include_under in [0, 1]:
+                                        for bet_type in ['sgp', 'all']:
+                                            for no_combos in [0, 1]:
+                                                for remove_threes in [0, 1]:
+                                                    X_pred['start_spot'] = start_spot
+                                                    X_pred['num_choices'] = num_choices
+                                                    X_pred['ens_vers'] = ens_vers
+                                                    X_pred['value_cut_greater'] = value_cut_greater
+                                                    X_pred['value_cut_less'] = value_cut_less
+                                                    X_pred['decimal_cut_greater'] = decimal_cut_greater
+                                                    X_pred['decimal_cut_less'] = decimal_cut_less
+                                                    X_pred['rank_order'] = rank_order
+                                                    X_pred['include_under'] = include_under
+                                                    X_pred['bet_type'] = bet_type
+                                                    X_pred['no_combos'] = no_combos
+                                                    X_pred['remove_threes'] = remove_threes
+
+                                                    if bet_type=='sgp':
+                                                        for matchup_rank in [0, 1, 2]:
+                                                            for num_matchups in [1, 2, 3]:
+                                                                X_pred['matchup_rank'] = matchup_rank
+                                                                X_pred['num_matchups'] = num_matchups
+
+                                                                if rank_order=='stack_model':
+                                                                    for wt_col in [None, 'decimal_odds', 'decimal_odds_twomax']:
+                                                                        X_pred['wt_col'] = wt_col
+                                                                        all_scores, X_pred = get_lgbm_pred(lgbm, X, X_pred, all_scores)
+                                                                else:
+                                                                    X_pred['wt_col'] = None
+                                                                    all_scores, X_pred = get_lgbm_pred(lgbm, X, X_pred, all_scores)
+                                                                
+                                                    else:
+                                                        X_pred['matchup_rank'] = np.nan
+                                                        X_pred['num_matchups'] = np.nan
+                                                        if rank_order=='stack_model':
+                                                            for wt_col in [None, 'decimal_odds', 'decimal_odds_twomax']:
+                                                                X_pred['wt_col'] = wt_col
+                                                                all_scores, X_pred = get_lgbm_pred(lgbm, X, X_pred, all_scores)
+                                                        else:
+                                                            X_pred['wt_col'] = None
+                                                            all_scores, X_pred = get_lgbm_pred(lgbm, X, X_pred, all_scores)
+                                                
+
+#%%                             
+display(all_scores.sort_values(by='score', ascending=False).head(25) )                          
+display(all_scores[all_scores.include_under==0].sort_values(by='score', ascending=False).head(25) )                          
+display(all_scores[all_scores.rank_order=='stack_model'].sort_values(by='score', ascending=False).head(25) )                          
+              
+                
+#%%
 from sklearn.model_selection import cross_val_score
 
 lgbm = LGBMRegressor(n_jobs=-1)
@@ -2190,10 +2394,6 @@ print(scores)
 
 shap_values = shap.TreeExplainer(lgbm).shap_values(X)
 shap.summary_plot(shap_values, X, feature_names=X.columns, plot_size=(8,10), max_display=30, show=False)
-
-#%%
-
-
 
 
 # %%

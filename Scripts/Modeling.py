@@ -596,6 +596,7 @@ for metric in run_params['metrics']:
     try:
         trial_times = get_trial_times(root_path, run_params)
         num_trials = calc_num_trials(trial_times, run_params)
+        print(trial_times)
         print('Lower trials:', {k:v for k,v in num_trials.items() if v < run_params['n_iters']})
     except:
         num_trials = None

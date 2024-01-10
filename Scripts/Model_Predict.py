@@ -999,6 +999,7 @@ run_params = {
     'train_date_orig': '2023-12-29',
     'test_time_split_orig': dt.date.today().strftime('%Y-%m-%d'),
 
+    # stopped running combo preds on 2024-01-28
     'metrics':  [
                 'points', 'assists', 'rebounds',
                 'points_assists', 'points_rebounds', 'points_rebounds_assists', 'assists_rebounds', 
@@ -1017,10 +1018,10 @@ run_params = {
 
     # set version and iterations
     'pred_vers': 'mse1_brier1',
-    'stack_model': 'random_kbest',
-    'stack_model_class': 'random_kbest',
-    # 'stack_model': 'random_full_stack',
-    # 'stack_model_class': 'random_full_stack',
+    # 'stack_model': 'random_kbest',
+    # 'stack_model_class': 'random_kbest',
+    'stack_model': 'random_full_stack',
+    'stack_model_class': 'random_full_stack',
     # 'stack_model': 'random_full_stack_ind_cats',
     # 'stack_model_class': 'random_full_stack_ind_cats',
     'parlay': False,
@@ -1063,213 +1064,218 @@ teams.year = teams.year.apply(lambda x: int(x.replace('-', '')))
 
 # %%
 
-# for te_date, tr_date in [
-#                             # ['2023-03-15', '2023-03-14'],
-#                             # ['2023-03-16', '2023-03-14'],
-#                             # ['2023-03-17', '2023-03-14'],
-#                             # ['2023-03-18', '2023-03-14'],
-#                             # ['2023-03-19', '2023-03-14'],
-#                             # ['2023-03-20', '2023-03-14'],
-#                             # ['2023-03-21', '2023-03-14'],
-#                             # ['2023-03-22', '2023-03-14'],
-#                             # ['2023-03-23', '2023-03-14'],
-#                             # ['2023-03-24', '2023-03-14'],
-#                             # ['2023-03-25', '2023-03-14'],
-#                             # ['2023-03-26', '2023-03-14'],
-#                             # ['2023-03-27', '2023-03-14'],
-#                             # ['2023-03-28', '2023-03-28'],
-#                             # ['2023-03-29', '2023-03-28'],
-#                             # ['2023-03-30', '2023-03-28'],
-#                             # ['2023-03-31', '2023-03-28'],
-#                             # ['2023-04-01', '2023-03-28'],
-#                             # ['2023-04-02', '2023-03-28'],
-#                             # ['2023-04-04', '2023-03-28'],
-#                             # ['2023-04-05', '2023-03-28'],
-#                             # ['2023-04-06', '2023-03-28'],
-#                             # ['2023-04-07', '2023-03-28'],
-#                             # ['2023-10-24', '2023-03-28'],
-#                             # ['2023-10-25', '2023-03-28'],
-#                             # ['2023-10-26', '2023-03-28'],
-#                             # ['2023-10-27', '2023-03-28'],
-#                             # ['2023-10-28', '2023-03-28'],
-#                             # ['2023-10-29', '2023-03-28'],
-#                             # ['2023-10-30', '2023-03-28'],
-#                             # ['2023-10-31', '2023-03-28'],
-#                             # ['2023-11-01', '2023-10-30'],
-#                             # ['2023-11-02', '2023-10-30'],
-#                             # ['2023-11-03', '2023-10-30'],
-#                             # ['2023-11-04', '2023-10-30'],
-#                             # ['2023-11-05', '2023-10-30'],
-#                             # ['2023-11-06', '2023-10-30'],
-#                             # ['2023-11-08', '2023-10-30'],
-#                             # ['2023-11-09', '2023-10-30'],
-#                             # ['2023-11-10', '2023-10-30'],
-#                             # ['2023-11-11', '2023-10-30'],
-#                             # ['2023-11-12', '2023-10-30'],
-#                             # ['2023-11-13', '2023-10-30'],
-#                             # ['2023-11-14', '2023-10-30'],
-#                             # ['2023-11-15', '2023-10-30'],
-#                             # ['2023-11-16', '2023-10-30'],
-#                             # ['2023-11-17', '2023-11-11'],
-#                             # ['2023-11-18', '2023-11-11'],
-#                             # ['2023-11-19', '2023-11-11'],
-#                             # ['2023-11-20', '2023-11-11'],
-#                             # ['2023-11-21', '2023-11-11'],
-#                             # ['2023-11-22', '2023-11-11'],
-#                             # ['2023-11-24', '2023-11-11'],
-#                             # ['2023-11-25', '2023-11-11'],
-#                             # ['2023-11-26', '2023-11-11'],
-#                             # ['2023-11-27', '2023-11-11'],
-#                             # ['2023-11-28', '2023-11-11'],
-#                             # ['2023-11-29', '2023-11-11'],
-#                             # ['2023-11-30', '2023-11-11'],
-#                             # ['2023-12-01', '2023-12-01'],
-#                             # ['2023-12-02', '2023-12-01'],
-#                             # ['2023-12-04', '2023-12-01'],
-#                             # ['2023-12-05', '2023-12-01'],
-#                             # ['2023-12-06', '2023-12-01'],
-#                             # ['2023-12-07', '2023-12-01'],
-#                             # ['2023-12-08', '2023-12-01'],
-#                             # ['2023-12-09', '2023-12-01'],
-#                             # ['2023-12-11', '2023-12-01'],
-#                             # ['2023-12-12', '2023-12-01'],
-#                             # ['2023-12-13', '2023-12-01'],
-#                             # ['2023-12-14', '2023-12-01'],
-#                             # ['2023-12-15', '2023-12-01'],
-#                             # ['2023-12-16', '2023-12-01'],
-#                             # ['2023-12-17', '2023-12-01'],
-#                             # ['2023-12-18', '2023-12-01'],
-#                             ['2023-12-19', '2023-12-01'],
-#                             ['2023-12-20', '2023-12-01'],
-#                             ['2023-12-21', '2023-12-01'],
-#                             ['2023-12-22', '2023-12-01'],
-#                             ['2023-12-23', '2023-12-01'],
-#                             ['2023-12-25', '2023-12-01'],
-#                             ['2023-12-26', '2023-12-01'],
-#                             ['2023-12-27', '2023-12-01'],
-#                             ['2023-12-28', '2023-12-01'],
-#                             ['2023-12-29', '2023-12-01'],
-#                             ['2023-12-30', '2023-12-29'],
-#                             ['2023-12-31', '2023-12-29'],
-#                             ['2024-01-01', '2023-12-29'],
-#                             ['2024-01-02', '2023-12-29'],
-
-#                             ]:
+for te_date, tr_date in [
+                            # ['2023-03-15', '2023-03-14'],
+                            # ['2023-03-16', '2023-03-14'],
+                            # ['2023-03-17', '2023-03-14'],
+                            # ['2023-03-18', '2023-03-14'],
+                            # ['2023-03-19', '2023-03-14'],
+                            # ['2023-03-20', '2023-03-14'],
+                            # ['2023-03-21', '2023-03-14'],
+                            # ['2023-03-22', '2023-03-14'],
+                            # ['2023-03-23', '2023-03-14'],
+                            # ['2023-03-24', '2023-03-14'],
+                            # ['2023-03-25', '2023-03-14'],
+                            # ['2023-03-26', '2023-03-14'],
+                            # ['2023-03-27', '2023-03-14'],
+                            # ['2023-03-28', '2023-03-28'],
+                            # ['2023-03-29', '2023-03-28'],
+                            # ['2023-03-30', '2023-03-28'],
+                            # ['2023-03-31', '2023-03-28'],
+                            # ['2023-04-01', '2023-03-28'],
+                            # ['2023-04-02', '2023-03-28'],
+                            # ['2023-04-04', '2023-03-28'],
+                            # ['2023-04-05', '2023-03-28'],
+                            # ['2023-04-06', '2023-03-28'],
+                            # ['2023-04-07', '2023-03-28'],
+                            # ['2023-10-24', '2023-03-28'],
+                            # ['2023-10-25', '2023-03-28'],
+                            # ['2023-10-26', '2023-03-28'],
+                            # ['2023-10-27', '2023-03-28'],
+                            # ['2023-10-28', '2023-03-28'],
+                            # ['2023-10-29', '2023-03-28'],
+                            # ['2023-10-30', '2023-03-28'],
+                            # ['2023-10-31', '2023-03-28'],
+                            # ['2023-11-01', '2023-10-30'],
+                            # ['2023-11-02', '2023-10-30'],
+                            # ['2023-11-03', '2023-10-30'],
+                            # ['2023-11-04', '2023-10-30'],
+                            # ['2023-11-05', '2023-10-30'],
+                            # ['2023-11-06', '2023-10-30'],
+                            # ['2023-11-08', '2023-10-30'],
+                            # ['2023-11-09', '2023-10-30'],
+                            # ['2023-11-10', '2023-10-30'],
+                            # ['2023-11-11', '2023-10-30'],
+                            # ['2023-11-12', '2023-10-30'],
+                            # ['2023-11-13', '2023-10-30'],
+                            # ['2023-11-14', '2023-10-30'],
+                            # ['2023-11-15', '2023-10-30'],
+                            # ['2023-11-16', '2023-10-30'],
+                            # ['2023-11-17', '2023-11-11'],
+                            # ['2023-11-18', '2023-11-11'],
+                            # ['2023-11-19', '2023-11-11'],
+                            # ['2023-11-20', '2023-11-11'],
+                            # ['2023-11-21', '2023-11-11'],
+                            # ['2023-11-22', '2023-11-11'],
+                            # ['2023-11-24', '2023-11-11'],
+                            # ['2023-11-25', '2023-11-11'],
+                            # ['2023-11-26', '2023-11-11'],
+                            # ['2023-11-27', '2023-11-11'],
+                            # ['2023-11-28', '2023-11-11'],
+                            # ['2023-11-29', '2023-11-11'],
+                            # ['2023-11-30', '2023-11-11'],
+                            # ['2023-12-01', '2023-12-01'],
+                            # ['2023-12-02', '2023-12-01'],
+                            # ['2023-12-04', '2023-12-01'],
+                            # ['2023-12-05', '2023-12-01'],
+                            # ['2023-12-06', '2023-12-01'],
+                            # ['2023-12-07', '2023-12-01'],
+                            # ['2023-12-08', '2023-12-01'],
+                            # ['2023-12-09', '2023-12-01'],
+                            # ['2023-12-11', '2023-12-01'],
+                            # ['2023-12-12', '2023-12-01'],
+                            # ['2023-12-13', '2023-12-01'],
+                            # ['2023-12-14', '2023-12-01'],
+                            # ['2023-12-15', '2023-12-01'],
+                            # ['2023-12-16', '2023-12-01'],
+                            # ['2023-12-17', '2023-12-01'],
+                            # ['2023-12-18', '2023-12-01'],
+                            # ['2023-12-19', '2023-12-01'],
+                            # ['2023-12-20', '2023-12-01'],
+                            # ['2023-12-21', '2023-12-01'],
+                            # ['2023-12-22', '2023-12-01'],
+                            # ['2023-12-23', '2023-12-01'],
+                            # ['2023-12-25', '2023-12-01'],
+                            # ['2023-12-26', '2023-12-01'],
+                            # ['2023-12-27', '2023-12-01'],
+                            # ['2023-12-28', '2023-12-01'],
+                            # ['2023-12-29', '2023-12-01'],
+                            # ['2023-12-30', '2023-12-29'],
+                            # ['2023-12-31', '2023-12-29'],
+                            # ['2024-01-01', '2023-12-29'],
+                            # ['2024-01-02', '2023-12-29'],
+                            ['2024-01-03', '2023-12-29'],
+                            ['2024-01-04', '2023-12-29'],
+                            ['2024-01-05', '2023-12-29'],
+                            ['2024-01-06', '2023-12-29'],
+                            ['2024-01-07', '2023-12-29'],
+                            ['2024-01-08', '2023-12-29'],
+                            ]:
     
-#     run_params['train_date'] = int(tr_date.replace('-', ''))
-#     run_params['test_time_split'] = int(te_date.replace('-', ''))
+    run_params['train_date'] = int(tr_date.replace('-', ''))
+    run_params['test_time_split'] = int(te_date.replace('-', ''))
 
-individual_cats = {}
-for metric in run_params['metrics']:
+    individual_cats = {}
+    for metric in run_params['metrics']:
 
-    # load data and filter down
-    pkey, model_output_path = create_pkey_output_path(metric, run_params)
-    df, run_params = load_data(run_params)
-    run_params['cur_metric'] = metric
-    output_teams = df.loc[df.game_date==run_params['test_time_split'], ['player', 'team', 'opponent']]
+        # load data and filter down
+        pkey, model_output_path = create_pkey_output_path(metric, run_params)
+        df, run_params = load_data(run_params)
+        run_params['cur_metric'] = metric
+        output_teams = df.loc[df.game_date==run_params['test_time_split'], ['player', 'team', 'opponent']]
 
-    df = create_y_act(df, metric)
-    df['week'] = 1
-    df['year'] = df.game_date
-    df['team'] = 0
+        df = create_y_act(df, metric)
+        df['week'] = 1
+        df['year'] = df.game_date
+        df['team'] = 0
 
-    df_train, df_predict, output_start = train_predict_split(df, run_params)
-    df_train_prob, df_predict_prob = get_over_under_class(df, metric, run_params)
-    output_start_prob = df_predict_prob[['player', 'game_date', 'value']].assign(metric=metric)
+        df_train, df_predict, output_start = train_predict_split(df, run_params)
+        df_train_prob, df_predict_prob = get_over_under_class(df, metric, run_params)
+        output_start_prob = df_predict_prob[['player', 'game_date', 'value']].assign(metric=metric)
 
-    # set up blank dictionaries for all metrics
-    out_reg, out_class, out_quant, out_million = {}, {}, {}, {}
+        # set up blank dictionaries for all metrics
+        out_reg, out_class, out_quant, out_million = {}, {}, {}, {}
 
-    #------------
-    # Run the Stacking Models and Generate Output
-    #------------
+        #------------
+        # Run the Stacking Models and Generate Output
+        #------------
 
-    # get the training data for stacking and prediction data after stacking
-    X_stack, X_stack_class, y_stack, y_stack_class, models_reg, models_class, models_quant = load_all_stack_pred(model_output_path)
+        # get the training data for stacking and prediction data after stacking
+        X_stack, X_stack_class, y_stack, y_stack_class, models_reg, models_class, models_quant = load_all_stack_pred(model_output_path)
 
-    X_predict, X_predict_class = get_stack_predict_data(df_train, df_predict, df_train_prob, df_predict_prob, run_params, 
-                                                        models_reg, models_quant, models_class)
-    
+        X_predict, X_predict_class = get_stack_predict_data(df_train, df_predict, df_train_prob, df_predict_prob, run_params, 
+                                                            models_reg, models_quant, models_class)
+        
 
-    
-    if 'ind_cats' in run_params['stack_model'] and metric in ['points', 'rebounds', 'assists', 'steals', 'blocks']:
-        individual_cats[metric] = {} 
-        individual_cats = save_individual_stats(individual_cats, metric, X_stack, X_stack_class, X_predict, X_predict_class)
+        
+        if 'ind_cats' in run_params['stack_model'] and metric in ['points', 'rebounds', 'assists', 'steals', 'blocks']:
+            individual_cats[metric] = {} 
+            individual_cats = save_individual_stats(individual_cats, metric, X_stack, X_stack_class, X_predict, X_predict_class)
 
-    combined_metrics = ['points_assists', 'points_rebounds', 'points_rebounds_assists', 'assists_rebounds', 'steals_blocks']
-    if 'ind_cats' in run_params['stack_model'] and metric in combined_metrics:
-        for k,v in individual_cats.items():
-            if k in metric:
-                X_stack = pd.merge(X_stack, individual_cats[k]['X_stack'], on=['player', 'year']).reset_index(drop=True)
-                X_stack_class = pd.merge(X_stack_class, individual_cats[k]['X_stack_class'][['player', 'year']], on=['player', 'year']).reset_index(drop=True)
-                X_predict = pd.merge(X_predict, individual_cats[k]['X_predict'], on=['player', 'week', 'year']).reset_index(drop=True)
-                X_predict_class = pd.merge(X_predict_class, individual_cats[k]['X_predict_class'], on=['player', 'week', 'year']).reset_index(drop=True)
+        combined_metrics = ['points_assists', 'points_rebounds', 'points_rebounds_assists', 'assists_rebounds', 'steals_blocks']
+        if 'ind_cats' in run_params['stack_model'] and metric in combined_metrics:
+            for k,v in individual_cats.items():
+                if k in metric:
+                    X_stack = pd.merge(X_stack, individual_cats[k]['X_stack'], on=['player', 'year']).reset_index(drop=True)
+                    X_stack_class = pd.merge(X_stack_class, individual_cats[k]['X_stack_class'][['player', 'year']], on=['player', 'year']).reset_index(drop=True)
+                    X_predict = pd.merge(X_predict, individual_cats[k]['X_predict'], on=['player', 'week', 'year']).reset_index(drop=True)
+                    X_predict_class = pd.merge(X_predict_class, individual_cats[k]['X_predict_class'], on=['player', 'week', 'year']).reset_index(drop=True)
 
-        X_predict_player_join = X_predict[['player', 'year']].rename(columns={'year':'game_date'})
-        X_predict_class_player_join = X_predict_class[['player', 'year']].rename(columns={'year':'game_date'})
-        output_start = pd.merge(output_start, X_predict_player_join, on=['player', 'game_date']).reset_index(drop=True)
-        output_start_prob = pd.merge(output_start_prob, X_predict_class_player_join, on=['player', 'game_date']).reset_index(drop=True)
+            X_predict_player_join = X_predict[['player', 'year']].rename(columns={'year':'game_date'})
+            X_predict_class_player_join = X_predict_class[['player', 'year']].rename(columns={'year':'game_date'})
+            output_start = pd.merge(output_start, X_predict_player_join, on=['player', 'game_date']).reset_index(drop=True)
+            output_start_prob = pd.merge(output_start_prob, X_predict_class_player_join, on=['player', 'game_date']).reset_index(drop=True)
 
-        X_stack = create_metric_split_columns_stack(X_stack, metric, individual_cats)
-        X_stack_class = create_metric_split_columns_stack(X_stack_class, metric, individual_cats)
-        X_predict = create_metric_split_columns_stack(X_predict, metric, individual_cats)
-        X_predict_class = create_metric_split_columns_stack(X_predict_class, metric, individual_cats)
+            X_stack = create_metric_split_columns_stack(X_stack, metric, individual_cats)
+            X_stack_class = create_metric_split_columns_stack(X_stack_class, metric, individual_cats)
+            X_predict = create_metric_split_columns_stack(X_predict, metric, individual_cats)
+            X_predict_class = create_metric_split_columns_stack(X_predict_class, metric, individual_cats)
 
-    X_stack_player = X_stack.copy()
-    X_predict_class_player = X_predict_class.copy()
-    X_stack = X_stack.drop(['player', 'year'], axis=1)
-    X_predict = X_predict.drop(['player', 'week', 'year'], axis=1)
-    y_stack = y_stack.drop(['player', 'year'], axis=1).y_act
+        X_stack_player = X_stack.copy()
+        X_predict_class_player = X_predict_class.copy()
+        X_stack = X_stack.drop(['player', 'year'], axis=1)
+        X_predict = X_predict.drop(['player', 'week', 'year'], axis=1)
+        y_stack = y_stack.drop(['player', 'year'], axis=1).y_act
 
-    odds = pull_odds(metric, run_params['parlay'])
-    X_stack_class = pd.merge(X_stack_class, odds, on=['player', 'year'])
-    X_predict_class = pd.merge(X_predict_class, odds, on=['player', 'year'])
+        odds = pull_odds(metric, run_params['parlay'])
+        X_stack_class = pd.merge(X_stack_class, odds, on=['player', 'year'])
+        X_predict_class = pd.merge(X_predict_class, odds, on=['player', 'year'])
 
-    X_stack_class = create_value_columns(X_stack_class, metric)
-    X_predict_class = create_value_columns(X_predict_class, metric)
+        X_stack_class = create_value_columns(X_stack_class, metric)
+        X_predict_class = create_value_columns(X_predict_class, metric)
 
-    y_stack_class = pd.merge(y_stack_class, X_stack_class[['player', 'year']], on=['player', 'year'])
-    y_stack_class = y_stack_class.drop(['player', 'year'], axis=1).y_act
+        y_stack_class = pd.merge(y_stack_class, X_stack_class[['player', 'year']], on=['player', 'year'])
+        y_stack_class = y_stack_class.drop(['player', 'year'], axis=1).y_act
 
-    X_stack_class = X_stack_class.drop(['player', 'year'], axis=1)
-    X_predict_class = X_predict_class.drop(['player', 'week', 'year'], axis=1)
+        X_stack_class = X_stack_class.drop(['player', 'year'], axis=1)
+        X_predict_class = X_predict_class.drop(['player', 'week', 'year'], axis=1)
 
-    X_stack_class = create_value_compare_col(X_stack_class)
-    X_predict_class = create_value_compare_col(X_predict_class)
+        X_stack_class = create_value_compare_col(X_stack_class)
+        X_predict_class = create_value_compare_col(X_predict_class)
 
-    if X_predict_class.shape[0] > 0:
+        if X_predict_class.shape[0] > 0:
 
-        best_val_prob, best_pred_prob = load_run_models(run_params, X_stack_class, y_stack_class, X_predict_class, 'class', alpha=None)         
-        best_val_mean, best_pred_mean = load_run_models(run_params, X_stack, y_stack, X_predict, 'reg', alpha=None)
-        best_val_q25, best_pred_q25 = load_run_models(run_params, X_stack, y_stack, X_predict, 'quantile', alpha=0.25)
-        best_val_q50, best_pred_q50 = load_run_models(run_params, X_stack, y_stack, X_predict, 'quantile', alpha=0.5)
-        best_val_q75, best_pred_q75 = load_run_models(run_params, X_stack, y_stack, X_predict, 'quantile', alpha=0.75)
+            best_val_prob, best_pred_prob = load_run_models(run_params, X_stack_class, y_stack_class, X_predict_class, 'class', alpha=None)         
+            best_val_mean, best_pred_mean = load_run_models(run_params, X_stack, y_stack, X_predict, 'reg', alpha=None)
+            best_val_q25, best_pred_q25 = load_run_models(run_params, X_stack, y_stack, X_predict, 'quantile', alpha=0.25)
+            best_val_q50, best_pred_q50 = load_run_models(run_params, X_stack, y_stack, X_predict, 'quantile', alpha=0.5)
+            best_val_q75, best_pred_q75 = load_run_models(run_params, X_stack, y_stack, X_predict, 'quantile', alpha=0.75)
 
-        preds = [best_pred_mean, best_pred_q25, best_pred_q50, best_pred_q75]
-        labels = ['pred_mean', 'pred_q25', 'pred_q50', 'pred_q75']
-        output = create_output(output_start, preds, labels)
-        output_prob = create_output_class(output_start_prob, best_pred_prob, output_teams)
-        output_prob = pd.merge(output_prob, output, on=['player', 'game_date'])
-        output_prob = add_dk_lines(output_prob)
+            preds = [best_pred_mean, best_pred_q25, best_pred_q50, best_pred_q75]
+            labels = ['pred_mean', 'pred_q25', 'pred_q50', 'pred_q75']
+            output = create_output(output_start, preds, labels)
+            output_prob = create_output_class(output_start_prob, best_pred_prob, output_teams)
+            output_prob = pd.merge(output_prob, output, on=['player', 'game_date'])
+            output_prob = add_dk_lines(output_prob)
 
-        output_prob = pd.merge(output_prob, df_predict[['player', 'game_date', 'y_act']], on=['player', 'game_date'], how='left')
-        output_prob['y_act_prob'] = np.where(output_prob.y_act >= output_prob.value, 1, 0)
-        output_prob = output_prob[['player', 'game_date', 'team', 'opponent', 'metric', 'decimal_odds', 'value', 
-                                    'prob_over', 'y_act_prob', 'y_act', 'pred_mean', 'pred_q25', 'pred_q50', 'pred_q75']]
-        output_prob = output_prob.assign(pred_vers=run_params['pred_vers'], ens_vers=run_params['class_ens_vers'], 
-                                        train_date=run_params['train_date'], parlay=run_params['parlay'])
-        output_prob = np.round(output_prob,3).sort_values(by='prob_over', ascending=False)
-        display(output_prob)
+            output_prob = pd.merge(output_prob, df_predict[['player', 'game_date', 'y_act']], on=['player', 'game_date'], how='left')
+            output_prob['y_act_prob'] = np.where(output_prob.y_act >= output_prob.value, 1, 0)
+            output_prob = output_prob[['player', 'game_date', 'team', 'opponent', 'metric', 'decimal_odds', 'value', 
+                                        'prob_over', 'y_act_prob', 'y_act', 'pred_mean', 'pred_q25', 'pred_q50', 'pred_q75']]
+            output_prob = output_prob.assign(pred_vers=run_params['pred_vers'], ens_vers=run_params['class_ens_vers'], 
+                                            train_date=run_params['train_date'], parlay=run_params['parlay'])
+            output_prob = np.round(output_prob,3).sort_values(by='prob_over', ascending=False)
+            display(output_prob)
 
-        del_str = f'''metric='{metric}'
-                    AND game_date={run_params['test_time_split']} 
-                    AND pred_vers='{run_params['pred_vers']}'
-                    AND ens_vers='{run_params['class_ens_vers']}'
-                    AND train_date={run_params['train_date']}
-                    AND parlay={run_params['parlay']}
-                    '''
-        dm.delete_from_db('Simulation', 'Over_Probability_New', del_str, create_backup=False)
-        dm.write_to_db(output_prob,'Simulation', 'Over_Probability_New', 'append')
+            del_str = f'''metric='{metric}'
+                        AND game_date={run_params['test_time_split']} 
+                        AND pred_vers='{run_params['pred_vers']}'
+                        AND ens_vers='{run_params['class_ens_vers']}'
+                        AND train_date={run_params['train_date']}
+                        AND parlay={run_params['parlay']}
+                        '''
+            dm.delete_from_db('Simulation', 'Over_Probability_New', del_str, create_backup=False)
+            dm.write_to_db(output_prob,'Simulation', 'Over_Probability_New', 'append')
 
 #%%
 
@@ -1639,165 +1645,140 @@ def save_all_results(tablename, choices, game_dates, val_greater, val_less, wt_c
 
 #%%
 
-def run_final_stack(X_train, y_train, cv_time_input, wt_col, bayes_rand, trials_obj=Trials()):
-
-    model_obj = 'class'
-    final_m = 'lr_c'
-    skm, X_train, y_train = get_skm(pd.concat([X_train, y_train], axis=1), model_obj, to_drop=['player', 'team', 'week', 'year'])
-    pipe, params = get_full_pipe(skm, final_m, stack_model='random_kbest', alpha=None, 
-                                 min_samples=10, bayes_rand='rand')
-    pipe.steps[-1][-1].solver = 'saga'
-
-    if bayes_rand == 'bayes':
-        params['random_sample__frac'] = hp.uniform('frac', 0.5, 1)
-        n_iter = 20
-    else:
-        params['random_sample__frac'] = np.arange(0.5, 1, 0.05)
-        n_iter = 10
-
-    if cv_time_input is None:
-        best_model, stack_scores, stack_pred, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
-                                                                        n_iter=n_iter, alpha=None, wt_col=wt_col,
-                                                                        trials=trials_obj, bayes_rand=bayes_rand,
-                                                                        run_adp=False, print_coef=False,
-                                                                        proba=True, num_k_folds=run_params['num_k_folds'],
-                                                                        random_state=100)
-
-    else: 
-        best_models, oof_data, param_scores, trials = skm.time_series_cv(pipe, X_train, y_train, params, n_iter=n_iter, 
-                                                                        n_splits=5, col_split='game_date', 
-                                                                        time_split=cv_time_input, bayes_rand=bayes_rand, proba=True, 
-                                                                        trials=trials_obj, random_seed=(i+7)*19+(i*12)+6, alpha=None)
-        
-    return best_models, oof_data, X_train, y_train, param_scores, trials
-
-
 i=20
 test_date = run_params['test_time_split']
 ens_vers = run_params['class_ens_vers']
 
 query_cuts = {
+    'random_full_stack_ind_cats_matt0_brier1_include2_kfold3': 
+    {'over': {'bet_type': 'all',
+                'decimal_cut_greater': '>0',
+                'decimal_cut_less': '<=2.3',
+                'ens_vers': 'random_full_stack_ind_cats_matt0_brier1_include2_kfold3',
+                'include_under': 0,
+                'last_date': 20240102,
+                'matchup_rank': np.nan,
+                'no_combos': 0,
+                'num_choices': 6,
+                'num_matchups': np.nan,
+                'rank_order': 'original',
+                'remove_threes': 1,
+                'score': 130.12492590994881,
+                'start_spot': 0,
+                'value_cut_greater': '>1.5',
+                'value_cut_less': '<50',
+                'wt_col': None},
+        'overall': {'bet_type': 'all',
+                    'decimal_cut_greater': '>0',
+                    'decimal_cut_less': '<=2.3',
+                    'ens_vers': 'random_full_stack_ind_cats_matt0_brier1_include2_kfold3',
+                    'include_under': 1,
+                    'last_date': 20240102,
+                    'matchup_rank': np.nan,
+                    'no_combos': 1,
+                    'num_choices': 6,
+                    'num_matchups': np.nan,
+                    'rank_order': 'avg',
+                    'remove_threes': 1,
+                    'score': 153.9521674676583,
+                    'start_spot': 0,
+                    'value_cut_greater': '>0.5',
+                    'value_cut_less': '<50',
+                    'wt_col': None}},
+ 'random_full_stack_matt0_brier1_include2_kfold3': 
+        {'over': {'bet_type': 'all',
+                'decimal_cut_greater': '>=1.7',
+                'decimal_cut_less': '<=2.3',
+                'ens_vers': 'random_full_stack_matt0_brier1_include2_kfold3',
+                'include_under': 0,
+                'last_date': 20240102,
+                'matchup_rank': np.nan,
+                'no_combos': 1,
+                'num_choices': 6,
+                'num_matchups': np.nan,
+                'rank_order': 'avg',
+                'remove_threes': 0,
+                'score': 108.41402556967586,
+                'start_spot': 0,
+                'value_cut_greater': '>0',
+                'value_cut_less': '<20',
+                'wt_col': None},
+        'overall': {'bet_type': 'sgp',
+                    'decimal_cut_greater': '>=1.7',
+                    'decimal_cut_less': '<=3',
+                    'ens_vers': 'random_full_stack_matt0_brier1_include2_kfold3',
+                    'include_under': 1,
+                    'last_date': 20240102,
+                    'matchup_rank': 0.0,
+                    'no_combos': 0,
+                    'num_choices': 6,
+                    'num_matchups': 2.0,
+                    'rank_order': 'original',
+                    'remove_threes': 0,
+                    'score': 149.41488665711168,
+                    'start_spot': 1,
+                    'value_cut_greater': '>2.5',
+                    'value_cut_less': '<20',
+                    'wt_col': None}},
+ 'random_kbest_matt0_brier1_include2_kfold3': 
+        {'over': {'bet_type': 'sgp',
+                'decimal_cut_greater': '>=1.7',
+                'decimal_cut_less': '<=2.3',
+                'ens_vers': 'random_kbest_matt0_brier1_include2_kfold3',
+                'include_under': 0,
+                'last_date': 20240105,
+                'matchup_rank': 2.0,
+                'no_combos': 1,
+                'num_choices': 6,
+                'num_matchups': 3.0,
+                'rank_order': 'avg',
+                'remove_threes': 0,
+                'score': 97.80716088863502,
+                'start_spot': 0,
+                'value_cut_greater': '>0.5',
+                'value_cut_less': '<100',
+                'wt_col': 'decimal_odds_twomax'},
+        'overall': {'bet_type': 'sgp',
+                    'decimal_cut_greater': '>0',
+                    'decimal_cut_less': '<=2.3',
+                    'ens_vers': 'random_kbest_matt0_brier1_include2_kfold3',
+                    'include_under': 1,
+                    'last_date': 20240105,
+                    'matchup_rank': 0.0,
+                    'no_combos': 1,
+                    'num_choices': 6,
+                    'num_matchups': 3.0,
+                    'rank_order': 'original',
+                    'remove_threes': 1,
+                    'score': 176.48902092131212,
+                    'start_spot': 2,
+                    'value_cut_greater': '>0.5',
+                    'value_cut_less': '<20',
+                    'wt_col': None}}}
 
-    'random_kbest_matt0_brier1_include2_kfold3': {
-    
-        # start 1-2, choose 6
-        'sgp_under': {
-            'decimal_cut_greater': '>0',
-            'decimal_cut_less': '<=2.3',
-            'val_greater': '>0.5',
-            'val_less': '<20',
-            'wt_col': None,
-            'include_under': True,
-            'rank_order': 'original',
-            'remove_combos': True,
-            'remove_threes': True,
-            'bet_type': 'sgp',
-            'matchup_rank': 0,
-            'num_matchups': 3
-        },
 
-        # start 3, choose 6
-        'all_under': {
-            'decimal_cut_greater': '>1.7',
-            'decimal_cut_less': '<=3',
-            'val_greater': '>0.5',
-            'val_less': '<30',
-            'wt_col': None,
-            'include_under': True,
-            'rank_order': 'original',
-            'remove_combos': True,
-            'remove_threes': True,
-            'bet_type': 'all',
-            'matchup_rank': np.nan,
-            'num_matchups': np.nan
-        },
-
-        # start 0, choose 6
-        'over': {
-            'decimal_cut_greater': '>0',
-            'decimal_cut_less': '<=2.3',
-            'val_greater': '>0',
-            'val_less': '<20',
-            'wt_col': None,
-            'include_under': False,
-            'rank_order': 'original',
-            'remove_combos': True,
-            'remove_threes': False,
-            'bet_type': 'sgp', 
-            'matchup_rank': 1,
-            'num_matchups': 3
-        },
-    },
-
-    'random_full_stack_matt0_brier1_include2_kfold3': {
-        # start1, choose 6
-        'sgp_under': {
-            'decimal_cut_greater': '>0',
-            'decimal_cut_less': '<=2.3',
-            'val_greater': '>2.5',
-            'val_less': '<20',
-            'wt_col': None,
-            'include_under': True,
-            'rank_order': 'original',
-            'remove_combos': True,
-            'remove_threes': True,
-            'bet_type': 'sgp',
-            'matchup_rank': 0,
-            'num_matchups': 2
-        },
-
-        # start 0, choose 6
-        'all_under': {
-            'decimal_cut_greater': '>=1.7',
-            'decimal_cut_less': '<=3',
-            'val_greater': '>4.5',
-            'val_less': '<20',
-            'wt_col': 'decimal_odds_twomax',
-            'include_under': True,
-            'rank_order': 'avg',
-            'remove_combos': True,
-            'remove_threes': False,
-            'bet_type': 'all',
-            'matchup_rank': np.nan,
-            'num_matchups': np.nan
-        },
-
-        # start 0, choose 6
-        'over': {
-            'decimal_cut_greater': '>=1.7',
-            'decimal_cut_less': '<=2.3',
-            'val_greater': '>0',
-            'val_less': '<30',
-            'wt_col': None,
-            'include_under': False,
-            'rank_order': 'original',
-            'remove_combos': True,
-            'remove_threes': False,
-            'bet_type': 'sgp',
-            'matchup_rank': 1,
-            'num_matchups': 3
-        },
-    
-    }
-}
 
 query_cut_ens = query_cuts[run_params['class_ens_vers']]
-
+print(run_params['class_ens_vers'])
 for cut_name, cut_dict in query_cut_ens.items():
 
     decimal_cut_greater = cut_dict['decimal_cut_greater']
     decimal_cut_less = cut_dict['decimal_cut_less']
-    val_greater = cut_dict['val_greater']
-    val_less = cut_dict['val_less']
+    val_greater = cut_dict['value_cut_greater']
+    val_less = cut_dict['value_cut_less']
     wt_col = cut_dict['wt_col']
-    include_under = cut_dict['include_under']
+    include_under = bool(cut_dict['include_under'])
     rank_order = cut_dict['rank_order']
     bet_type = cut_dict['bet_type']
-    remove_combos = cut_dict['remove_combos']
-    remove_threes = cut_dict['remove_threes']
+    remove_combos = bool(cut_dict['no_combos'])
+    remove_threes = bool(cut_dict['remove_threes'])
+    if bet_type=='sgp':
+        matchup_rank = int(cut_dict['matchup_rank'])
+        num_matchups = int(cut_dict['num_matchups'])
 
     print('\n=======\n', val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, '\n=======\n')
-
+    print(f"Start spot {cut_dict['start_spot']}, num choices {cut_dict['num_choices']}")
+    print(f'{cut_name}, Score:', np.round(cut_dict['score'],1))
     q = f'''SELECT * 
             FROM Over_Probability_New 
             WHERE value {val_greater}
@@ -1835,7 +1816,7 @@ for cut_name, cut_dict in query_cut_ens.items():
                                                     proba=True, num_k_folds=run_params['num_k_folds'],
                                                     random_state=(i*2)+(i*7))
 
-        # show_calibration_curve(stack_pred, y_train, 'stack_model')
+        show_calibration_curve(y_train, stack_pred['stack_pred'], n_bins=8)
 
         for c in X_train.columns:
             if c not in X_test.columns:
@@ -1855,15 +1836,15 @@ for cut_name, cut_dict in query_cut_ens.items():
     dummy_dict = {'xx': get_choices_dict()}
     if rank_order=='original':
         if include_under: preds_orig = flip_probs(preds_orig, pred_col='prob_over')
-        if bet_type=='sgp': preds_orig, _ = top_sgp_choices('xx', preds_orig, 'prob_over', dummy_dict, 0, 3, remove_combos, remove_threes)
+        if bet_type=='sgp': preds_orig, _ = top_sgp_choices('xx', preds_orig, 'prob_over', dummy_dict, matchup_rank, num_matchups, remove_combos, remove_threes)
         if bet_type=='all': preds_orig, _ = top_all_choices(preds_orig, 'prob_over', 'xx', dummy_dict, remove_combos, remove_threes)
 
     if include_under and rank_order in ['stack_model', 'avg']:
         preds_stack = flip_probs(preds_stack, pred_col='final_pred')
         preds_avg = flip_probs(preds_avg, pred_col='avg_prob')
         if bet_type=='sgp':
-            preds_stack, _ = top_sgp_choices('xx', preds_stack, 'final_pred', dummy_dict, 0, 3, remove_combos, remove_threes)
-            preds_avg, _ = top_sgp_choices('xx', preds_avg, 'avg_prob', dummy_dict, 0, 3, remove_combos, remove_threes)
+            preds_stack, _ = top_sgp_choices('xx', preds_stack, 'final_pred', dummy_dict, matchup_rank, num_matchups, remove_combos, remove_threes)
+            preds_avg, _ = top_sgp_choices('xx', preds_avg, 'avg_prob', dummy_dict, matchup_rank, num_matchups, remove_combos, remove_threes)
         if bet_type=='all':
             preds_stack, _ = top_all_choices(preds_stack, 'final_pred', 'xx', dummy_dict, remove_combos, remove_threes)
             preds_avg, _ = top_all_choices(preds_avg, 'avg_prob', 'xx', dummy_dict, remove_combos, remove_threes)
@@ -2142,78 +2123,80 @@ display(aggregate_choices(all_sgp_choices['original_True_False_0_3']))
 
 #%%
 
-# from lightgbm import LGBMRegressor
-# from sklearn.model_selection import RandomizedSearchCV
-
-# choice_params = dm.read('''
-#                             SELECT * 
-#                             FROM Probability_Choices                          
-#                         ''', 'Simulation').sample(frac=1).reset_index(drop=True)
-# X = choice_params.drop('winnings', axis=1)
-# y = choice_params.winnings
-# X.value_cut_greater = X.value_cut_greater.apply(lambda x: x.replace('>', '')).astype(float)
-# X.value_cut_less = X.value_cut_less.apply(lambda x: x.replace('<', '')).astype(float)
-
-# for c in X.columns:
-#     if X[c].dtypes=='object': X[c] = X[c].astype('category')
-
-# params = {
-#     'n_estimators': range(100, 250, 25),
-#     'num_leaves': range(75, 250, 20),
-#     'min_child_samples': range(150, 400, 20),
-#     'learning_rate': [0.2, 0.25, 0.3, 0.35],
-# }
-
-# grid = RandomizedSearchCV(LGBMRegressor(n_jobs=-1), params, n_iter=10, scoring='neg_mean_squared_error', n_jobs=-1, cv=3)
-# grid.fit(X,y)
-# pd.concat([pd.DataFrame(grid.cv_results_['params']), pd.DataFrame(grid.cv_results_['mean_test_score'])], axis=1).sort_values(by=0)
-
-#%%
-
 from lightgbm import LGBMRegressor
-choice_params = dm.read('''
-                            SELECT * 
-                            FROM Probability_Choices                          
-                        ''', 'Simulation')
-X = choice_params.drop('winnings', axis=1)
-y = choice_params.winnings
-X.value_cut_greater = X.value_cut_greater.apply(lambda x: x.replace('>', '')).astype(float)
-X.value_cut_less = X.value_cut_less.apply(lambda x: x.replace('<', '')).astype(float)
+from sklearn.model_selection import RandomizedSearchCV
+from sklearn.model_selection import KFold
+def choice_param_training_data(use_cats=True):
 
-for c in X.columns:
-    if X[c].dtypes=='object': X[c] = X[c].astype('category')
+    choice_params = dm.read('''
+                                SELECT * 
+                                FROM Probability_Choices                          
+                            ''', 'Simulation').sample(frac=1).reset_index(drop=True)
+    choice_params = choice_params[~((choice_params.rank_order=='original') & (choice_params.wt_col.str.contains('decimal')))]
+    choice_params = choice_params[~((choice_params.bet_type=='all') & (~choice_params.matchup_rank.isnull()))]
+    choice_params = choice_params.reset_index(drop=True)
 
-lgbm = LGBMRegressor(n_jobs=-1)
-best_params = {'num_leaves': 235, 'n_estimators': 200, 'min_child_samples': 190, 'learning_rate': 0.2}
-# best_params = {'num_leaves': 135, 'n_estimators': 125, 'min_child_samples': 200, 'learning_rate': 0.3}
+    X = choice_params.drop('winnings', axis=1)
+    y = choice_params.winnings
+    if not use_cats:
+        X.value_cut_greater = X.value_cut_greater.apply(lambda x: x.replace('>', '')).astype(float)
+        X.value_cut_less = X.value_cut_less.apply(lambda x: x.replace('<', '')).astype(float)
 
-lgbm.set_params(**best_params)
-lgbm.fit(X,y)
+    for c in X.columns:
+        if X[c].dtypes=='object': X[c] = X[c].astype('category')
 
-X_pred = X[(X.start_spot <= 3) & (X.num_choices >= 3)].reset_index(drop=True).copy()
-X_pred['score'] = lgbm.predict(X_pred)
-
-X_pred = X_pred.sort_values(by='score', ascending=False)
-display(X_pred.head(25) )    
-display(X_pred[(X_pred.bet_type=='all')].head(25) )           
-display(X_pred[(X_pred.include_under==0)].head(25) )                
+    return X, y
 
 
+
+#%%
+
+X, y = choice_param_training_data(use_cats=False)
+    
+params = {
+    'n_estimators': range(200, 450, 25),
+    'num_leaves': range(250, 500, 25),
+    'min_child_samples': range(50, 400, 25),
+    'learning_rate': [0.2, 0.25, 0.3, 0.35, 0.4],
+    'subsample': [0.8, 0.85, 0.9, 0.95, 1]
+}
+
+predictions = pd.DataFrame()
+for i, (train_idx, test_idx) in enumerate(KFold(n_splits=3, shuffle=True).split(X)):
+    print(f'Fold {i+1}')
+    X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
+    y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+
+    lgbm = LGBMRegressor(n_jobs=16) 
+    grid = RandomizedSearchCV(lgbm, params, n_iter=20, scoring='neg_mean_squared_error', n_jobs=2, cv=3)
+    grid.fit(X_train,y_train)
+    scores = pd.concat([pd.DataFrame(grid.cv_results_['params']), pd.DataFrame(grid.cv_results_['mean_test_score'])], axis=1).sort_values(by=0)
+    print(scores)
+    cur_predict = pd.DataFrame(grid.best_estimator_.predict(X_test), index=test_idx, columns=['score'])
+    predictions = pd.concat([predictions, cur_predict], axis=0)
+
+predictions = pd.merge(X, predictions,left_index=True, right_index=True)
+predictions = predictions.sort_values(by='score', ascending=False).reset_index(drop=True)
+
+#%%
+
+
+import pprint
+best_results = {}
+
+for ens_v in ['random_kbest_matt0_brier1_include2_kfold3',
+              'random_full_stack_matt0_brier1_include2_kfold3', 
+              'random_full_stack_ind_cats_matt0_brier1_include2_kfold3']:
+    
+    display(predictions[predictions.ens_vers==ens_v].head(25) )    
+    display(predictions[(predictions.include_under==0) & (predictions.ens_vers==ens_v)].head(25) )
+
+    best_choice = predictions[predictions.ens_vers==ens_v].iloc[0].to_dict()
+    
+
+    best_results[ens_v] = {}
+    best_results[ens_v]['overall'] = 
+    best_results[ens_v]['over'] = predictions[(predictions.include_under==0) & (predictions.ens_vers==ens_v)].iloc[0].to_dict()
+
+pprint.pprint(best_results)
 # %%
-
-# df = dm.read("SELECT * FROM Over_Probability_New", 'Simulation')
-# df = df[~((df.game_date==20231119) & (df.team.isin(['PHI', 'BKN'])))]
-# dm.write_to_db(df,'Simulation', 'Over_Probability_New', 'replace', create_backup=True)
-
-#%%
-
-# df = dm.read("SELECT * FROM Over_Probability_New", 'Simulation')
-# df = df[~((df.game_date==20231206) & (df.train_date==20231111))]
-# dm.write_to_db(df,'Simulation', 'Over_Probability_New', 'replace', create_backup=True)
-
-#%%
-
-df = dm.read("SELECT * FROM DraftKings_Odds", 'Player_Stats')
-df = df[~((df.game_date==20231119) & (df.team.isin(['PHI', 'BKN'])))]
-
-dm.write_to_db(df,'Player_Stats', 'DraftKings_Odds', 'replace', create_backup=True)

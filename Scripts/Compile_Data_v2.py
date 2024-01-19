@@ -548,6 +548,30 @@ def add_team_box_score(df, team_or_opp):
 
     return df
 
+def add_hustle_stats(df):
+    hustle = dm.read("SELECT * FROM Hustle_Stats", 'Player_Stats')
+    hustle = hustle.rename(columns={'PLAYER_NAME': 'player'})
+
+    hustle = hustle.drop(['GAME_ID', 'TEAM_ABBREVIATION', 'TEAM_ID', 'TEAM_CITY', 
+                        'PLAYER_ID', 'START_POSITION', 'COMMENT', 'MINUTES', 'PTS'], axis=1)
+    hustle = hustle.sort_values(by=['player', 'game_date']).reset_index(drop=True)
+
+    r_cols = [c for c in hustle.columns if c not in ('player', 'game_date')]
+    hustle_roll = add_rolling_stats(hustle, gcols=['player'], rcols=r_cols)
+
+    hustle_roll = hustle_roll.drop([ 'CONTESTED_SHOTS', 'CONTESTED_SHOTS_2PT',
+                                    'CONTESTED_SHOTS_3PT', 'DEFLECTIONS', 'CHARGES_DRAWN', 'SCREEN_ASSISTS',
+                                    'SCREEN_AST_PTS', 'OFF_LOOSE_BALLS_RECOVERED', 'BOX_OUTS',
+                                    'DEF_LOOSE_BALLS_RECOVERED', 'LOOSE_BALLS_RECOVERED', 'OFF_BOXOUTS',
+                                    'DEF_BOXOUTS', 'BOX_OUT_PLAYER_TEAM_REBS', 'BOX_OUT_PLAYER_REBS'
+                                    ], axis=1)
+                
+    hustle_roll.game_date = hustle_roll.groupby('player')['game_date'].shift(-1)
+    hustle_roll = hustle_roll.fillna({'game_date': max_date})
+    df = pd.merge(df, hustle_roll, on=['player', 'game_date'], how='left')
+
+    return df
+
 def add_team_advanced_stats(df, team_or_opp):
     team_adv = dm.read("SELECT * FROM Advanced_Stats", 'Team_Stats')
     team_adv  = team_adv.rename(columns={'TEAM_ABBREVIATION': team_or_opp})
@@ -583,6 +607,25 @@ def add_team_tracking(df, team_or_opp):
     df = pd.merge(df, team_tr, on=[team_or_opp, 'game_date'], how='left')
 
     return df
+
+def add_team_hustle_stats(df, team_or_opp):
+    team_hustle = dm.read("SELECT * FROM Hustle_Stats", 'Team_Stats')
+    team_hustle  = team_hustle.rename(columns={'TEAM_ABBREVIATION': team_or_opp})
+
+    team_hustle = team_hustle.drop(['GAME_ID', 'TEAM_ID', 'TEAM_CITY', 'TEAM_NAME', 'PTS'], axis=1)
+    team_hustle = team_hustle.sort_values(by=[team_or_opp, 'game_date']).reset_index(drop=True)
+
+    r_cols = [c for c in team_hustle.columns if c not in (team_or_opp, 'game_date')]
+    team_hustle = add_rolling_stats(team_hustle, gcols=[team_or_opp], rcols=r_cols)
+    team_hustle = team_hustle.drop(r_cols, axis=1)
+        
+    team_hustle.game_date = team_hustle.groupby(team_or_opp)['game_date'].shift(-1)
+    team_hustle = team_hustle.fillna({'game_date': max_date})
+    team_hustle.columns = [f'{team_or_opp}_{c}' if c not in (team_or_opp, 'game_date') else c for c in team_hustle.columns]
+    df = pd.merge(df, team_hustle, on=[team_or_opp, 'game_date'], how='left')
+
+    return df
+
 
 
 def remove_low_corrs(df, threshold):
@@ -667,6 +710,10 @@ if train_date == '2023-12-29':
     days_since_training = (dt.datetime.now() - dt.datetime.strptime('2023-12-29', '%Y-%m-%d')).days
     game_dates = df.game_date.sort_values(ascending=False).unique()
     df = df[df.game_date.isin(game_dates[:100+days_since_training])].reset_index(drop=True)
+else:
+    days_since_training = (dt.datetime.now() - dt.datetime.strptime(train_date, '%Y-%m-%d')).days
+    game_dates = df.game_date.sort_values(ascending=False).unique()
+    df = df[df.game_date.isin(game_dates[:120+days_since_training])].reset_index(drop=True)
 
 df = fantasy_pros(df)
 df = numberfire(df)
@@ -698,7 +745,9 @@ df, adv_stats = add_advanced_stats(df)
 df = add_last_game_advanced_stats(df, adv_stats)
 
 df = add_tracking_stats(df)
-print(df.shape)
+if train_date == '2024-01-18':
+    df = add_hustle_stats(df)
+print('after adv stats:', df.shape)
 
 # add team stats
 df = add_team_box_score(df, 'team')
@@ -707,7 +756,12 @@ df = add_team_advanced_stats(df, 'team')
 df = add_team_advanced_stats(df, 'opponent')
 df = add_team_tracking(df, 'team')
 df = add_team_tracking(df, 'opponent')
-print(df.shape)
+
+if train_date == '2024-01-18':
+    df = add_team_hustle_stats(df, 'team')
+    df = add_team_hustle_stats(df, 'opponent')
+
+print('after team stats:', df.shape)
 
 df = add_dk_team_lines(df)
 df = forward_fill(df)
@@ -823,7 +877,12 @@ if df.shape[1] > 2000:
 # %%
 
 team_df[['team', 'opponent', 'game_date', 'y_act_team_pts', 'y_act_opponent_pts', 'y_act_spread', 'spread', 'y_act_over_spread']]
-# %%
 
+#%%
+
+df = dm.read("SELECT * FROM Model_Data_20240118v2", 'Model_Features')
+df.corr()['y_act_steals'].sort_values()
+# %%
+df.corr()['y_act_assists'].sort_values()
 
 # %%

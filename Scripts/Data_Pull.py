@@ -448,6 +448,11 @@ class NBAStats:
         hustle = self.ep.hustlestatsboxscore.HustleStatsBoxScore(game_id=game_id)
         hustle_player, hustle_team = self.player_team_df(hustle, i_select=1)
         return hustle_player, hustle_team
+    
+    def get_usage_stats(self, game_id):
+        usage = self.ep.boxscoreusagev2.BoxScoreUsageV2(game_id=game_id)
+        usage_player, usage_team = self.player_team_df(usage)
+        return usage_player, usage_team
 
     def pull_all_stats(self, stat_cat, game_date):
 
@@ -458,7 +463,8 @@ class NBAStats:
             'box_score': 'self.get_box_score(game_id)',
             'tracking_data': 'self.get_tracking_data(game_id)',
             'advanced_stats': 'self.get_advanced_stats(game_id)',
-            'hustle_stats': 'self.get_hustle_stats(game_id)'
+            'hustle_stats': 'self.get_hustle_stats(game_id)',
+            'usage_stats': 'self.get_usage_stats(game_id)'
         }
 
         print(f'Pulling {stat_cat}')
@@ -491,10 +497,12 @@ time.sleep(2)
 adv_players, adv_teams = nba_stats.pull_all_stats('advanced_stats', yesterday_date)
 time.sleep(2)
 hustle_players, hustle_teams = nba_stats.pull_all_stats('hustle_stats', yesterday_date)
+time.sleep(2)
+usage_players, usage_teams = nba_stats.pull_all_stats('usage_stats', yesterday_date)
 
 
-dfs = [box_score_players, tracking_players, adv_players, hustle_players]
-tnames = ['Box_Score', 'Tracking_Data', 'Advanced_Stats', 'Hustle_Stats']
+dfs = [box_score_players, tracking_players, adv_players, hustle_players, usage_players]
+tnames = ['Box_Score', 'Tracking_Data', 'Advanced_Stats', 'Hustle_Stats', 'Usage_Stats']
 for df, tname in zip(dfs, tnames):
     dm.delete_from_db('Player_Stats', tname, f"game_date='{yesterday_date}'")
     dm.write_to_db(df, 'Player_Stats', tname, 'append')
@@ -507,20 +515,18 @@ for df, tname in zip(dfs, tnames):
 
 #%%
 
-yesterday_date = dt.datetime.now().date()-dt.timedelta(1)
-
-nba_stats.ep.hustlestatsboxscore.HustleStatsBoxScore(game_id='0022300566').get_data_frames()[2]
+nba_stats.ep.boxscoreusagev2.BoxScoreUsageV2(game_id='0022300566').get_data_frames()[0]
 
 #%%
 
-for game_date in dm.read("SELECT DISTINCT game_date FROM Box_Score", 'Player_Stats').values[20:]:
+for game_date in dm.read("SELECT DISTINCT game_date FROM Box_Score", 'Player_Stats').values[1:]:
     
     print(game_date)
     game_date = dt.datetime.strptime(game_date[0], '%Y-%m-%d').date()
-    hustle_players, hustle_teams = nba_stats.pull_all_stats('hustle_stats', game_date)
+    usage_players, _ = nba_stats.pull_all_stats('usage_stats', game_date)
 
-    dm.write_to_db(hustle_teams, 'Team_Stats', 'Hustle_Stats', 'append')
-    dm.write_to_db(hustle_players, 'Player_Stats', 'Hustle_Stats', 'append')
+    # dm.write_to_db(hustle_teams, 'Team_Stats', 'Hustle_Stats', 'append')
+    dm.write_to_db(usage_players, 'Player_Stats', 'Usage_Stats', 'append')
     time.sleep(5)
 
 

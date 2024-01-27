@@ -371,11 +371,9 @@ def get_full_pipe(skm, m, alpha=None, stack_model=False, min_samples=10, bayes_r
                                 skm.piece(m)
                                 ])
 
-        if m in ('qr_q', 'gbmh_q'): pipe.steps[-1][-1].quantile = alpha
-        elif m in ('rf_q', 'knn_q'): pipe.steps[-1][-1].q = alpha
-        else: pipe.steps[-1][-1].alpha = alpha
-    
-
+        if m in ('qr_q', 'gbmh_q'): pipe.set_params(**{f'{m}__quantile': alpha})
+        elif m in ('rf_q', 'knn_q'): pipe.set_params(**{f'{m}__q': alpha})
+        else: pipe.set_params(**{f'{m}__alpha': alpha})
 
     # get the params for the current pipe and adjust if needed
     params = skm.default_params(pipe, bayes_rand, min_samples=min_samples)
@@ -645,106 +643,23 @@ for m, label, df, model_obj, i, min_samples, alpha, n_iter in func_params[-1:]:
                                                                      time_split=run_params['cv_time_input'],
                                                                      bayes_rand=bayes_rand, proba=proba, trials=trials,
                                                                      random_seed=(i+7)*19+(i*12)+6, alpha=alpha)
-#%%
-
-col_split = 'game_date'
-time_split = run_params['cv_time_input']
-n_splits = run_params['n_splits']
-random_seed = 1
-
-X_labels = skm.data[['player', 'team', 'week', 'year', 'y_act']].copy()
-folds = skm.get_fold_data(X, y, X_labels, time_col=col_split, val_cut=time_split, 
-                            n_splits=n_splits, random_state=random_seed)
-
-#%%
-hold_results = pd.DataFrame()
-val_results = pd.DataFrame()
-param_scores = pd.DataFrame()
-best_models = []
-i_seed = 5
-for fold in range(n_splits):
-
-    print('-----------------')
-
-    # get the train and holdout data
-    X_train, y_train, X_hold, y_hold, X_val_labels, X_hold_labels = self.unpack_fold(folds, fold)
-    cv_time_train = self.cv_time_splits(X_train, 'game_date', time_split)
-    cv_time_hold = self.cv_time_splits(X_hold, 'game_date', time_split)
-
-    fit_params = self.weight_params(model, y_train, sample_weight)
-    
-    if scoring is None and self.model_obj=='reg': scoring = self.scorer('sera')
-    elif scoring is None and self.model_obj=='class': scoring = self.scorer('brier')
-    elif scoring is None and self.model_obj=='quantile': scoring = self.scorer('pinball', **{'alpha': alpha})
-
-    self.X_train = X_train
-    self.y_train = y_train
-    self.X_hold = X_hold
-    self.y_hold = y_hold
-    self.cv_time_train = cv_time_train
-    self.cv_time_hold = cv_time_hold
-    self.proba=proba
-    self.randseed = random_seed * i_seed
-    self.alpha = alpha
-    self.trials = trials
-    np.random.seed(self.randseed)
-
-    if bayes_rand == 'bayes':
-        best_model, param_scores = self.custom_bayes_search(model, params, n_iter)
-    
-    elif bayes_rand == 'rand':
-        best_model, ps = self.custom_rand_search(model, params, n_iters=n_iter)
-        param_scores = pd.concat([param_scores, ps], axis=0)
-
-    
-    best_models.append(clone(best_model))
-    val_pred, hold_pred = self.cv_predict_time_holdout(best_model, sample_weight)
-    
-    val_wts, hold_wts = self.metrics_weights(self.get_y_val(), y_hold, sample_weight)
-    y_val = self.get_y_val()
-    
-    _ = self.test_scores(y_val, val_pred, val_wts, label='Val')
-    print('---')
-    _ = self.test_scores(y_hold, hold_pred, hold_wts)
-
-    hold_results_cur = pd.Series(hold_pred, name='pred')
-    hold_results_cur = pd.concat([X_hold_labels, hold_results_cur], axis=1)
-    hold_results = pd.concat([hold_results, hold_results_cur], axis=0)
-
-    val_results_cur = pd.Series(val_pred, name='pred')
-    val_results_cur = pd.concat([X_val_labels, val_results_cur], axis=1)
-    val_results = pd.concat([val_results, val_results_cur], axis=0)
-
-    i_seed += 1
-
-print('\nOverall\n==============')
-val_wts, hold_wts = self.metrics_weights(val_results.y_act.values, hold_results.y_act.values, sample_weight)
-
-val_score = self.test_scores(val_results.y_act, val_results.pred, val_wts, label='Val')
-print('---')
-hold_score = self.test_scores(hold_results.y_act, hold_results.pred, hold_wts, label='Test')
-
-oof_data = {
-    'scores': [np.round(val_score,3), np.round(hold_score,3)],
-    'full_val': val_results, 
-    'full_hold': hold_results, 
-    'hold': hold_results.pred.values,
-    'actual': hold_results.y_act.values
-    }
-
-gc.collect()    
 
 #%%
 
 scores = load_pickle(model_output_path, 'all_param_scores')
 scores['reg_gbm'].sort_values(by='score').head(20)
+
 #%%
 
-metric = 'points_rebounds'
+metric = 'steals'
 
 # load data and filter down
 pkey, model_output_path = create_pkey_output_path(metric, run_params, vers)
 df, run_params = load_data(run_params)
+
+game_dates = df.game_date.sort_values(ascending=False).unique()
+run_params['cv_time_input'] = game_dates[run_params['cv_time_input_back_days']]
+
 df = remove_low_counts(df)
 df = create_y_act(df, metric)
 
@@ -760,16 +675,29 @@ df_train_diff, df_predict_diff = get_over_under_class(df, metric, run_params, mo
 # set up blank dictionaries for all metrics
 out_reg, out_quant, out_class, out_diff = output_dict(),  output_dict(), output_dict(), output_dict()
 
+#%%
+
+# 'qr_q', 'gbmh_q'): pipe.set_params(**{f'{m}__quantile': alpha})
+#         elif m in ('rf_q', 'knn_q')
+
 cur_df = df_train.copy()
 model_obj = 'reg'
-model_name = 'mlp'
+model_name = 'lgbm'
 out_dict={}
 alpha=None
 i=50
 
 skm, X, y = get_skm(cur_df, model_obj, to_drop=run_params['drop_cols'])
-pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples, bayes_rand='bayes')
+# pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples, bayes_rand='bayes')
+# pipe.set_params(**{'lgbm__objective': 'tweedie'})
 
+pipe = skm.model_pipe([skm.piece('random_sample'),
+                       skm.piece('std_scale'),
+                       skm.piece('pca'),
+                       skm.piece(model_name)])
+params = skm.default_params(pipe, 'bayes', min_samples=min_samples)
+
+#%%
 if model_obj == 'class': proba = True
 else: proba = False
 
@@ -778,13 +706,14 @@ print(f'\n{model_name}\n============\n')
 # fit and append the ADP model
 import time
 start = time.time()
-best_models, oof_data, _, trials = skm.time_series_cv(pipe, X, y, params, n_iter=10, trials=Trials(),
+best_models, oof_data, _, trials = skm.time_series_cv(pipe, X, y, params, n_iter=3, trials=Trials(),
                                                 n_splits=run_params['n_splits'], col_split='game_date', 
                                                 bayes_rand='bayes', time_split=run_params['cv_time_input'],
                                                 proba=proba, random_seed=(i+7)*19+(i*12)+6, alpha=alpha)
 
 print('Time Elapsed:', np.round((time.time()-start)/60,1), 'Minutes')
 
+oof_data['full_hold'].plot.scatter(x='pred', y='y_act')
 # col_label = str(alpha)
 # out_dict = update_output_dict(model_obj, model_name, col_label, out_dict, oof_data, best_models)
 

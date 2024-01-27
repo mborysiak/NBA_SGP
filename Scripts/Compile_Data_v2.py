@@ -701,19 +701,14 @@ def get_columns(df, train_date, threshold=0.05):
 
 #%%
 
-train_date = '2023-12-29'
+train_date = '2024-01-18'
 max_date = dm.read("SELECT max(game_date) FROM FantasyData", 'Player_Stats').values[0][0]
 
 df = fantasy_data()
 
-if train_date == '2023-12-29':
-    days_since_training = (dt.datetime.now() - dt.datetime.strptime('2023-12-29', '%Y-%m-%d')).days
-    game_dates = df.game_date.sort_values(ascending=False).unique()
-    df = df[df.game_date.isin(game_dates[:100+days_since_training])].reset_index(drop=True)
-else:
-    days_since_training = (dt.datetime.now() - dt.datetime.strptime(train_date, '%Y-%m-%d')).days
-    game_dates = df.game_date.sort_values(ascending=False).unique()
-    df = df[df.game_date.isin(game_dates[:120+days_since_training])].reset_index(drop=True)
+days_since_training = (dt.datetime.now() - dt.datetime.strptime(train_date, '%Y-%m-%d')).days
+game_dates = df.game_date.sort_values(ascending=False).unique()
+df = df[df.game_date.isin(game_dates[:120+days_since_training])].reset_index(drop=True)
 
 df = fantasy_pros(df)
 df = numberfire(df)
@@ -745,8 +740,7 @@ df, adv_stats = add_advanced_stats(df)
 df = add_last_game_advanced_stats(df, adv_stats)
 
 df = add_tracking_stats(df)
-if train_date == '2024-01-18':
-    df = add_hustle_stats(df)
+df = add_hustle_stats(df)
 print('after adv stats:', df.shape)
 
 # add team stats
@@ -757,9 +751,8 @@ df = add_team_advanced_stats(df, 'opponent')
 df = add_team_tracking(df, 'team')
 df = add_team_tracking(df, 'opponent')
 
-if train_date == '2024-01-18':
-    df = add_team_hustle_stats(df, 'team')
-    df = add_team_hustle_stats(df, 'opponent')
+df = add_team_hustle_stats(df, 'team')
+df = add_team_hustle_stats(df, 'opponent')
 
 print('after team stats:', df.shape)
 

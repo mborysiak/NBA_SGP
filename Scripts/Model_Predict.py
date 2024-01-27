@@ -173,9 +173,9 @@ def get_full_pipe(skm, m, alpha=None, stack_model=False, min_samples=10, bayes_r
     params = skm.default_params(pipe, bayes_rand=bayes_rand, min_samples=min_samples)
     
     if skm.model_obj == 'quantile':
-        if m in ('qr_q', 'gbmh_q'): pipe.steps[-1][-1].quantile = alpha
-        elif m in ('rf_q', 'knn_q'): pipe.steps[-1][-1].q = alpha
-        else: pipe.steps[-1][-1].alpha = alpha
+        if m in ('qr_q', 'gbmh_q'): pipe.set_params(**{f'{m}__quantile': alpha})
+        elif m in ('rf_q', 'knn_q'): pipe.set_params(**{f'{m}__q': alpha})
+        else: pipe.set_params(**{f'{m}__alpha': alpha})
 
     if stack_model=='random_full_stack' and run_params['opt_type']=='bayes': 
         params['random_sample__frac'] = hp.uniform('random_sample__frac', 0.5, 1)
@@ -995,13 +995,14 @@ def create_metric_split_columns_stack(df, metric, individual_cats):
 run_params = {
     
     # set year and week to analyze
-    'last_train_date_orig': '2023-12-01',
-    'train_date_orig': '2023-12-29',
+    'last_train_date_orig': '2023-12-29',
+    'train_date_orig': '2024-01-18',
     'test_time_split_orig': dt.date.today().strftime('%Y-%m-%d'),
 
     'metrics':  [
                 'points', 'assists', 'rebounds',
-                'points_assists', 'points_rebounds', 'points_rebounds_assists', 'assists_rebounds', 
+                'points_assists', 'points_rebounds',
+                'points_rebounds_assists', 'assists_rebounds', 
                 'three_pointers',  'blocks',  'steals', 'steals_blocks', 
     ],
 
@@ -1275,6 +1276,7 @@ for metric in run_params['metrics']:
                     '''
         dm.delete_from_db('Simulation', 'Over_Probability_New', del_str, create_backup=False)
         dm.write_to_db(output_prob,'Simulation', 'Over_Probability_New', 'append')
+
 
 #%%
 
@@ -1626,197 +1628,144 @@ i=20
 test_date = run_params['test_time_split']
 ens_vers = run_params['class_ens_vers']
 
-query_cuts = {
-    'random_full_stack_ind_cats_matt0_brier1_include2_kfold3': 
-              {
-                # 'over': {'bet_type': 'all',
-                #         'decimal_cut_greater': '>0',
-                #         'decimal_cut_less': '<=2.3',
-                #         'ens_vers': 'random_full_stack_ind_cats_matt0_brier1_include2_kfold3',
-                #         'include_under': 0,
-                #         'last_date': 20240102,
-                #         'matchup_rank': np.nan,
-                #         'no_combos': 1,
-                #         'num_choices': 6,
-                #         'num_matchups': np.nan,
-                #         'rank_order': 'avg',
-                #         'remove_threes': 1,
-                #         'score': 144.36464616056998,
-                #         'start_spot': 0,
-                #         'value_cut_greater': '>0.5',
-                #         'value_cut_less': '<100',
-                #         'wt_col': 'decimal_odds_twomax'},
-                'overall': {'bet_type': 'all',
-                            'decimal_cut_greater': '>0',
-                            'decimal_cut_less': '<=3',
-                            'ens_vers': 'random_full_stack_ind_cats_matt0_brier1_include2_kfold3',
-                            'include_under': 1,
-                            'last_date': 20240102,
-                            'matchup_rank': np.nan,
-                            'no_combos': 0,
-                            'num_choices': 6,
-                            'num_matchups': np.nan,
-                            'rank_order': 'original',
-                            'remove_threes': 0,
-                            'score': 191.1159932487286,
-                            'start_spot': 0,
-                            'value_cut_greater': '>4.5',
-                            'value_cut_less': '<20',
-                            'wt_col': None},
-                'overall_high': {'avg_win_odds': 60.22315872274024,
-                        'bet_type': 'sgp',
-                        'decimal_cut_greater': '>0',
-                        'decimal_cut_less': '<=3',
-                        'ens_vers': 'random_full_stack_ind_cats_matt0_brier1_include2_kfold3',
-                        'include_under': 1,
-                        'kc_avg': 0.0376142126695443,
-                        'kc_num_choices': 0.01787913753929101,
-                        'kc_wins': 0.05734928779979759,
-                        'last_date': 20240112,
-                        'matchup_rank': '1',
-                        'no_combos': 1,
-                        'num_choices': 7.0,
-                        'num_correct_pct': 0.6173790210760959,
-                        'num_matchups': '3',
-                        'num_trials': 94.0,
-                        'num_wins': 6.862180103487058,
-                        'num_wins_pct': 0.07300191599454317,
-                        'num_wins_pct_choices': 0.03418716394126485,
-                        'rank_order': 'original',
-                        'remove_threes': 0,
-                        'score': 326.1243416598182,
-                        'start_spot': 1,
-                        'value_cut_greater': '>0',
-                        'value_cut_less': '<100',
-                        'wt_col': None}
-                        },
-
- 'random_full_stack_matt0_brier1_include2_kfold3': 
-                {
-                    # 'over': {'bet_type': 'sgp',
-                    #     'decimal_cut_greater': '>=1.7',
-                    #     'decimal_cut_less': '<=2.3',
-                    #     'ens_vers': 'random_full_stack_matt0_brier1_include2_kfold3',
-                    #     'include_under': 0,
-                    #     'last_date': 20240102,
-                    #     'matchup_rank': 1.0,
-                    #     'no_combos': 1,
-                    #     'num_choices': 6,
-                    #     'num_matchups': 3.0,
-                    #     'rank_order': 'original',
-                    #     'remove_threes': 0,
-                    #     'score': 130.2372282242432,
-                    #     'start_spot': 0,
-                    #     'value_cut_greater': '>0',
-                    #     'value_cut_less': '<40',
-                    #     'wt_col': None},
-            'overall': {'bet_type': 'all',
-                        'decimal_cut_greater': '>=1.7',
-                        'decimal_cut_less': '<=3',
-                        'ens_vers': 'random_full_stack_matt0_brier1_include2_kfold3',
-                        'include_under': 1,
-                        'last_date': 20240102,
-                        'matchup_rank': np.nan,
-                        'no_combos': 1,
-                        'num_choices': 6,
-                        'num_matchups': np.nan,
-                        'rank_order': 'avg',
-                        'remove_threes': 0,
-                        'score': 146.85808012734222,
-                        'start_spot': 0,
-                        'value_cut_greater': '>4.5',
-                        'value_cut_less': '<20',
-                        'wt_col': None},
-            'overall_high': {'avg_win_odds': 46.91220415727382,
-                        'bet_type': 'sgp',
-                        'decimal_cut_greater': '>0',
-                        'decimal_cut_less': '<=3',
-                        'ens_vers': 'random_full_stack_matt0_brier1_include2_kfold3',
-                        'include_under': 1,
-                        'kc_avg': 0.03716615358387693,
-                        'kc_num_choices': 0.0137254511527149,
-                        'kc_wins': 0.06060685601503897,
-                        'last_date': 20240112,
-                        'matchup_rank': '0',
-                        'no_combos': 1,
-                        'num_choices': 7.0,
-                        'num_correct_pct': 0.6188190893368577,
-                        'num_matchups': '2',
-                        'num_trials': 95.0,
-                        'num_wins': 7.659978237882789,
-                        'num_wins_pct': 0.08063134987245041,
-                        'num_wins_pct_choices': 0.034749288479581614,
-                        'rank_order': 'original',
-                        'remove_threes': 0,
-                        'score': 272.00644117371473,
-                        'start_spot': 0,
-                        'value_cut_greater': '>2.5',
-                        'value_cut_less': '<15',
-                        'wt_col': None}},
-
- 'random_kbest_matt0_brier1_include2_kfold3': 
-            {
-                # 'over': {'bet_type': 'sgp',
-                #     'decimal_cut_greater': '>=1.7',
-                #     'decimal_cut_less': '<=2.3',
-                #     'ens_vers': 'random_kbest_matt0_brier1_include2_kfold3',
-                #     'include_under': 0,
-                #     'last_date': 20240105,
-                #     'matchup_rank': 2.0,
-                #     'no_combos': 1,
-                #     'num_choices': 6,
-                #     'num_matchups': 3.0,
-                #     'rank_order': 'avg',
-                #     'remove_threes': 0,
-                #     'score': 111.29912210387003,
-                #     'start_spot': 0,
-                #     'value_cut_greater': '>0.5',
-                #     'value_cut_less': '<100',
-                #     'wt_col': 'decimal_odds'},
-            'overall': {'bet_type': 'sgp',
-                        'decimal_cut_greater': '>0',
-                        'decimal_cut_less': '<=3',
-                        'ens_vers': 'random_kbest_matt0_brier1_include2_kfold3',
-                        'include_under': 1,
-                        'last_date': 20240105,
-                        'matchup_rank': 0.0,
-                        'no_combos': 1,
-                        'num_choices': 6,
-                        'num_matchups': 3.0,
-                        'rank_order': 'original',
-                        'remove_threes': 1,
-                        'score': 190.6650328057673,
-                        'start_spot': 2,
-                        'value_cut_greater': '>0.5',
-                        'value_cut_less': '<30',
-                        'wt_col': None},
-            'overall_high': {'avg_win_odds': 67.97380432804707,
-                        'bet_type': 'all',
-                        'decimal_cut_greater': '>0',
-                        'decimal_cut_less': '<=3',
-                        'ens_vers': 'random_kbest_matt0_brier1_include2_kfold3',
-                        'include_under': 1,
-                        'kc_avg': 0.036848173526077305,
-                        'kc_num_choices': 0.01669512683647685,
-                        'kc_wins': 0.05700122021567775,
-                        'last_date': 20240112,
-                        'matchup_rank': np.nan,
-                        'no_combos': 1,
-                        'num_choices': 8.0,
-                        'num_correct_pct': 0.6481888216389031,
-                        'num_matchups': np.nan,
-                        'num_trials': 86.0,
-                        'num_wins': 6.095180651510691,
-                        'num_wins_pct': 0.07087419362221734,
-                        'num_wins_pct_choices': 0.03116106533858002,
-                        'rank_order': 'original',
-                        'remove_threes': 0,
-                        'score': 334.40779760139685,
-                        'start_spot': 4,
-                        'value_cut_greater': '>0.5',
-                        'value_cut_less': '<15',
-                        'wt_col': None}}
-                        }
+query_cuts = {'random_full_stack_ind_cats_matt0_brier1_include2_kfold3': {'overall': {'bet_type': 'sgp',
+                                                                        'decimal_cut_greater': '>0',
+                                                                        'decimal_cut_less': '<=3',
+                                                                        'ens_vers': 'random_full_stack_ind_cats_matt0_brier1_include2_kfold3',
+                                                                        'include_under': 1,
+                                                                        'last_date': 20240121,
+                                                                        'matchup_rank': '1',
+                                                                        'no_combos': 1,
+                                                                        'num_choices': 8.0,
+                                                                        'num_correct_pct': 0.6298543681676525,
+                                                                        'num_correct_pct_pred': 0.6192062408468895,
+                                                                        'num_matchups': '3',
+                                                                        'num_trials': 103.0,
+                                                                        'num_wins_pct': 0.06796116438872656,
+                                                                        'rank_order': 'original',
+                                                                        'remove_threes': 0,
+                                                                        'start_spot': 1,
+                                                                        'value_cut_greater': '>0',
+                                                                        'value_cut_less': '<30',
+                                                                        'win_pct_pred': 0.054961695126231454,
+                                                                        'winnings': 553.4,
+                                                                        'winnings_pred': 437.13515921733176,
+                                                                        'wt_col': None},
+                                                            'with_cuts': {'bet_type': 'sgp',
+                                                                        'decimal_cut_greater': '>0',
+                                                                        'decimal_cut_less': '<=3',
+                                                                        'ens_vers': 'random_full_stack_ind_cats_matt0_brier1_include2_kfold3',
+                                                                        'include_under': 1,
+                                                                        'last_date': 20240121,
+                                                                        'matchup_rank': '2',
+                                                                        'no_combos': 0,
+                                                                        'num_choices': 5.0,
+                                                                        'num_correct_pct': 0.6129032244883802,
+                                                                        'num_correct_pct_pred': 0.6017032059028029,
+                                                                        'num_matchups': '3',
+                                                                        'num_trials': 93.0,
+                                                                        'num_wins_pct': 0.1182795686206498,
+                                                                        'rank_order': 'avg',
+                                                                        'remove_threes': 0,
+                                                                        'start_spot': 0,
+                                                                        'value_cut_greater': '>4.5',
+                                                                        'value_cut_less': '<100',
+                                                                        'win_pct_pred': 0.10688989289781291,
+                                                                        'winnings': 149.39999999999998,
+                                                                        'winnings_pred': 154.62195481405573,
+                                                                        'wt_col': 'decimal_odds'}},
+'random_full_stack_matt0_brier1_include2_kfold3': {'overall': {'bet_type': 'sgp',
+                                                                'decimal_cut_greater': '>=1.7',
+                                                                'decimal_cut_less': '<=3',
+                                                                'ens_vers': 'random_full_stack_matt0_brier1_include2_kfold3',
+                                                                'include_under': 1,
+                                                                'last_date': 20240121,
+                                                                'matchup_rank': '2',
+                                                                'no_combos': 1,
+                                                                'num_choices': 8.0,
+                                                                'num_correct_pct': 0.5577956981750057,
+                                                                'num_correct_pct_pred': 0.5696313446328487,
+                                                                'num_matchups': '3',
+                                                                'num_trials': 93.0,
+                                                                'num_wins_pct': 0.053763440282113543,
+                                                                'rank_order': 'avg',
+                                                                'remove_threes': 0,
+                                                                'start_spot': 0,
+                                                                'value_cut_greater': '>4.5',
+                                                                'value_cut_less': '<100',
+                                                                'win_pct_pred': 0.039804245977531315,
+                                                                'winnings': 546.4,
+                                                                'winnings_pred': 460.44338399277285,
+                                                                'wt_col': None},
+                                                    'with_cuts': {'bet_type': 'sgp',
+                                                                'decimal_cut_greater': '>0',
+                                                                'decimal_cut_less': '<=2.3',
+                                                                'ens_vers': 'random_full_stack_matt0_brier1_include2_kfold3',
+                                                                'include_under': 1,
+                                                                'last_date': 20240121,
+                                                                'matchup_rank': '1',
+                                                                'no_combos': 1,
+                                                                'num_choices': 6.0,
+                                                                'num_correct_pct': 0.6148867303966234,
+                                                                'num_correct_pct_pred': 0.6092344140487077,
+                                                                'num_matchups': '3',
+                                                                'num_trials': 103.0,
+                                                                'num_wins_pct': 0.09708737769818081,
+                                                                'rank_order': 'original',
+                                                                'remove_threes': 0,
+                                                                'start_spot': 2,
+                                                                'value_cut_greater': '>2.5',
+                                                                'value_cut_less': '<40',
+                                                                'win_pct_pred': 0.10276409746424212,
+                                                                'winnings': 170.5,
+                                                                'winnings_pred': 166.5730231106437,
+                                                                'wt_col': None}},
+'random_kbest_matt0_brier1_include2_kfold3': {'overall': {'bet_type': 'sgp',
+                                                        'decimal_cut_greater': '>0',
+                                                        'decimal_cut_less': '<=3',
+                                                        'ens_vers': 'random_kbest_matt0_brier1_include2_kfold3',
+                                                        'include_under': 1,
+                                                        'last_date': 20240121,
+                                                        'matchup_rank': '1',
+                                                        'no_combos': 0,
+                                                        'num_choices': 8.0,
+                                                        'num_correct_pct': 0.5767857132557398,
+                                                        'num_correct_pct_pred': 0.5571319501165336,
+                                                        'num_matchups': '1',
+                                                        'num_trials': 70.0,
+                                                        'num_wins_pct': 0.07142857040816328,
+                                                        'rank_order': 'original',
+                                                        'remove_threes': 0,
+                                                        'start_spot': 1,
+                                                        'value_cut_greater': '>5.5',
+                                                        'value_cut_less': '<15',
+                                                        'win_pct_pred': 0.04194773075931836,
+                                                        'winnings': 725.7,
+                                                        'winnings_pred': 480.1883662473569,
+                                                        'wt_col': None},
+                                            'with_cuts': {'bet_type': 'sgp',
+                                                            'decimal_cut_greater': '>0',
+                                                            'decimal_cut_less': '<=3',
+                                                            'ens_vers': 'random_kbest_matt0_brier1_include2_kfold3',
+                                                            'include_under': 1,
+                                                            'last_date': 20240121,
+                                                            'matchup_rank': '0',
+                                                            'no_combos': 1,
+                                                            'num_choices': 6.0,
+                                                            'num_correct_pct': 0.657894735687904,
+                                                            'num_correct_pct_pred': 0.6589808991759925,
+                                                            'num_matchups': '3',
+                                                            'num_trials': 95.0,
+                                                            'num_wins_pct': 0.11578947246537398,
+                                                            'rank_order': 'original',
+                                                            'remove_threes': 1,
+                                                            'start_spot': 2,
+                                                            'value_cut_greater': '>0.5',
+                                                            'value_cut_less': '<40',
+                                                            'win_pct_pred': 0.12032739316683791,
+                                                            'winnings': 233.7,
+                                                            'winnings_pred': 218.74094341823348,
+                                                            'wt_col': None}}}
 
 query_cut_ens = query_cuts[run_params['class_ens_vers']]
 print(run_params['class_ens_vers'])
@@ -1838,7 +1787,9 @@ for cut_name, cut_dict in query_cut_ens.items():
 
     print('\n=======\n', val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, '\n=======\n')
     print(f"Start spot {cut_dict['start_spot']}, num choices {cut_dict['num_choices']}")
-    print(f'{cut_name}, Score:', np.round(cut_dict['score'],1))
+    try: print(f'{cut_name}, Score:', np.round(cut_dict['score'],1))
+    except: print(f'{cut_name}, Score:', np.round(cut_dict['winnings'],1))
+
     q = f'''SELECT * 
             FROM Over_Probability_New 
             WHERE value {val_greater}
@@ -1917,7 +1868,7 @@ for cut_name, cut_dict in query_cut_ens.items():
 
 #%%
 
-def calc_stack_model(tablename,last_run_tablename, ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less):
+def calc_stack_model(tablename, last_run_date, ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less):
 
     print('\n=======\n', val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, '\n=======\n')
 
@@ -1936,7 +1887,6 @@ def calc_stack_model(tablename,last_run_tablename, ens_vers, past_runs, wt_col, 
     game_dates = pull_game_dates(q)
 
     if save_path.split('/')[-1] in past_runs:
-        last_run_date = find_last_run(ens_vers, tablename=last_run_tablename)
         trial_obj = get_past_trials(ens_vers, decimal_cut_greater, decimal_cut_less, val_greater, val_less, wt_col, include_under='')
         game_dates = [d for d in game_dates if d > last_run_date]
         num_back_days = 60
@@ -1948,12 +1898,14 @@ def calc_stack_model(tablename,last_run_tablename, ens_vers, past_runs, wt_col, 
 
     num_trials = 10; i=20
     if len(game_dates)>0:
-        for test_date in game_dates:
+        train_pred_all = dm.read(q, 'Simulation')
 
+        for test_date in game_dates:
+            
             num_back_days = np.max([num_back_days-1, 60])
             print('Date:', test_date)
 
-            train_pred = dm.read(q, 'Simulation')
+            train_pred = train_pred_all.copy()
             train_pred = train_pred.drop('y_act', axis=1).rename(columns={'y_act_prob': 'y_act'})
             train_pred = get_date_info(train_pred)
             train_pred = train_pred.dropna().reset_index(drop=True)
@@ -2018,7 +1970,8 @@ for ens_vers in ['random_kbest_matt0_brier1_include2_kfold3',
                 'random_full_stack_ind_cats_matt0_brier1_include2_kfold3'
                  ]:
     
-    past_runs = get_past_runs(ens_vers, tablename='Stack_Model_Predict', foldername='pick_choices')
+    past_runs = get_past_runs(ens_vers, tablename=last_run_tablename, foldername='pick_choices')
+    last_run_date = find_last_run(ens_vers, tablename=last_run_tablename)
 
     wt_col_list=[None, 'decimal_odds', 'decimal_odds_twomax']
     decimal_cut_greater_list = ['>0', '>=1.7']
@@ -2033,13 +1986,13 @@ for ens_vers in ['random_kbest_matt0_brier1_include2_kfold3',
     #------------
 
     # for wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less in iter_cats[:1]:
-    #     calc_stack_model(save_tablename, ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less)
+    #     calc_stack_model(save_tablename, last_run_tablename, ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less)
 
-    out = Parallel(n_jobs=-1, verbose=50)(
-        delayed(calc_stack_model)
-        (save_tablename, last_run_tablename, ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less) 
-        for wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less in iter_cats
-    )
+    # out = Parallel(n_jobs=-1, verbose=50)(
+    #     delayed(calc_stack_model)
+    #     (save_tablename, last_run_date, ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less) 
+    #     for wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less in iter_cats
+    # )
 
 # #------------
 # # Transfer from Staging to Prod
@@ -2109,7 +2062,7 @@ def run_past_choices(pull_tablename, save_tablename, ens_vers, wt_col, decimal_c
 #-------------
 pull_tablename = 'Stack_Model_Predict_Staging'
 save_tablename = 'Probability_Choices_Staging'
-reset_table('Probability_Choices_Staging', 'Probability_Choices_Staging')
+# reset_table('Probability_Choices_Staging', 'Probability_Choices_Staging')
 
 #--------------
 # Set Params
@@ -2129,44 +2082,58 @@ iter_cats = list(set(itertools.product(ens_vers_list, wt_col_list, decimal_cut_g
 #------------
 # Run
 #------------
-out = Parallel(n_jobs=-1, verbose=50)(
-    delayed(run_past_choices)
-    (pull_tablename, save_tablename, ens_vers, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less) 
-    for ens_vers, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less in iter_cats
-)
+# out = Parallel(n_jobs=-1, verbose=50)(
+#     delayed(run_past_choices)
+#     (pull_tablename, save_tablename, ens_vers, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less) 
+#     for ens_vers, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less in iter_cats
+# )
 
 # for ens_vers, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less in iter_cats[:1]:
 #     run_past_choices(pull_tablename, save_tablename, ens_vers, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less)
 
 #%%
 
-# staging = dm.read("SELECT * FROM Probability_Choices_Staging", 'Simulation')
-# final = dm.read("SELECT * FROM Probability_Choices", 'Simulation')
-# orig_cols = final.columns
+cur_ens_vers = 'random_full_stack_ind_cats_matt0_brier1_include2_kfold3'
 
-# staging = staging.rename(columns={'winnings': 'winnings_add', 'last_date': 'last_date_new'})
-# staging.winnings_add = staging.winnings_add.astype(float)
+staging = dm.read(f'''SELECT * 
+                      FROM Probability_Choices_Staging 
+                      WHERE ens_vers = '{cur_ens_vers}'  
+                  ''', 'Simulation')
+final = dm.read(f'''SELECT * 
+                    FROM Probability_Choices
+                    WHERE ens_vers = '{cur_ens_vers}'
+                ''', 'Simulation')
+orig_cols = final.columns
 
-# merge_cols = [c for c in final if c not in ('winnings', 'last_date')]
+update_cols = {'winnings': 'winnings_add', 
+                'last_date': 'last_date_new',
+                'num_correct': 'num_correct_add',
+                'num_wins': 'num_wins_add',
+                'num_trials': 'num_trials_add'}
+staging = staging.rename(columns=update_cols).drop(['num_correct_pct', 'num_wins_pct'], axis=1)
+for k, v in update_cols.items(): 
+    staging[v] = staging[v].astype(float)
+    final[k] = final[k].astype(float)
 
-# for c in merge_cols:
-#     staging[c] = staging[c].astype(final[c].dtypes)
+merge_cols = ['start_spot', 'num_choices', 'value_cut_greater', 'value_cut_less', 'wt_col', 'decimal_cut_greater', 
+              'decimal_cut_less', 'rank_order', 'include_under', 'ens_vers', 'bet_type', 'matchup_rank', 
+              'num_matchups', 'no_combos', 'remove_threes']
 
-# final = pd.merge(final, staging, on=merge_cols, how='left')
-# final['winnings'] = final.winnings + final.winnings_add
-# final['last_date'] = final.last_date_new
+for c in merge_cols:
+    staging[c] = staging[c].astype(final[c].dtypes)
 
-# final
+final = pd.merge(final, staging, on=merge_cols, how='left')
 
-#%%
+for k,v in update_cols.items():
+    if k!='last_date': final[k] = final[k] + final[v]
+    else: final[k] = final[v]
 
-for ens_vers in ['random_kbest_matt0_brier1_include2_kfold3', 'random_full_stack_matt0_brier1_include2_kfold3',
-                    'random_full_stack_ind_cats_matt0_brier1_include2_kfold3']:
-    print(ens_vers)
-    df = dm.read(f"SELECT * FROM Probability_Choices_Staging WHERE ens_vers='{ens_vers}'", 'Simulation')
-    dm.delete_from_db('Simulation','Probability_Choices', f"ens_vers='{ens_vers}'",  False)
-    dm.write_to_db(df, 'Simulation', 'Probability_Choices', 'append')
+final['num_correct_pct'] = final.num_correct / ((final.num_trials*final.num_choices)+0.000001)
+final['num_wins_pct'] = final.num_wins / (final.num_trials+0.000001)
+final = final[orig_cols]
 
+dm.delete_from_db('Simulation', 'Probability_Choices', f"ens_vers = '{cur_ens_vers}'", False)
+dm.write_to_db(final, 'Simulation', 'Probability_Choices', 'append', create_backup=False)
 
 #%%
 
@@ -2174,15 +2141,16 @@ from lightgbm import LGBMRegressor
 from sklearn.model_selection import RandomizedSearchCV
 from sklearn.model_selection import KFold
 
-def choice_param_training_data(use_cats=True, y_var='winnings'):
+def choice_param_training_data(use_cats=True, max_start_spot=8):
 
-    choice_params = dm.read('''
+    choice_params = dm.read(f'''
                                 SELECT * 
                                 FROM Probability_Choices
                                 WHERE NOT (rank_order='original' 
                                            AND wt_col IS NOT NULL)
                                       AND NOT (bet_type='all' 
-                                               AND matchup_rank IS NOT NULL)           
+                                               AND matchup_rank IS NOT NULL)    
+                                      AND start_spot <= {max_start_spot}      
                             ''', 'Simulation').sample(frac=1).reset_index(drop=True)
 
     X = choice_params.drop(['winnings', 'num_correct', 'num_wins', 'num_correct_pct', 'num_wins_pct'], axis=1)
@@ -2199,76 +2167,104 @@ def choice_param_training_data(use_cats=True, y_var='winnings'):
     return X, y_winnings, y_win_pct, y_num_correct_pct
 
 
-def cross_fold_predict(X, y, params):
+class FoldPredict:
 
-    predictions = pd.DataFrame()
-    for i, (train_idx, test_idx) in enumerate(KFold(n_splits=3, shuffle=True).split(X)):
-        print(f'Fold {i+1}')
-        X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
-        y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+    def __init__(self, save_path):
+        self.save_path = save_path
 
-        lgbm = LGBMRegressor(n_jobs=16) 
-        grid = RandomizedSearchCV(lgbm, params, n_iter=10, scoring='neg_mean_absolute_error', n_jobs=2, cv=3)
-        grid.fit(X_train,y_train)
-        scores = pd.concat([pd.DataFrame(grid.cv_results_['params']), pd.DataFrame(grid.cv_results_['mean_test_score'])], axis=1).sort_values(by=0)
-        print(scores)
-        cur_predict = pd.DataFrame(grid.best_estimator_.predict(X_test), index=test_idx, columns=['score'])
-        print('MAE:', np.round(np.mean(np.abs(cur_predict.score - y_test)), 5))
-        predictions = pd.concat([predictions, cur_predict], axis=0)
+    def cross_fold_train(self, model_type, model, params, X, y, n_iter=10):
 
-    predictions = pd.merge(X, predictions,left_index=True, right_index=True)
+        for i, (train_idx, test_idx) in enumerate(KFold(n_splits=4, shuffle=True).split(X)):
+            print(f'Fold {i+1}')
+            X_train, _ = X.iloc[train_idx], X.iloc[test_idx]
+            y_train, _ = y.iloc[train_idx], y.iloc[test_idx]
 
-    return predictions
+            grid = RandomizedSearchCV(model, params, n_iter=n_iter, scoring='neg_mean_absolute_error', n_jobs=2, cv=4)
+            grid.fit(X_train,y_train)
+            
+            scores = pd.concat([pd.DataFrame(grid.cv_results_['params']), 
+                                pd.DataFrame(grid.cv_results_['mean_test_score'])], axis=1).sort_values(by=0)
+            print(scores)
+
+            best_model = grid.best_estimator_
+    
+            if not os.path.exists(self.save_path): os.makedirs(self.save_path)
+            save_pickle(best_model, self.save_path, f'{model_type}_fold{i}')
+
+    def cross_fold_predict(self, model_type, X, y):
+
+        predictions = pd.DataFrame()
+        for _, (train_idx, test_idx) in enumerate(KFold(n_splits=4, shuffle=True).split(X)):
+
+            X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
+            y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+
+            cur_predict = pd.DataFrame()
+            for i in range(4):
+                model = load_pickle(self.save_path, f'{model_type}_fold{i}')
+                model.fit(X_train, y_train)
+                model_i_predict = pd.DataFrame(model.predict(X_test), index=test_idx, columns=[f'score_{i}'])
+                cur_predict = pd.concat([cur_predict, model_i_predict], axis=1)
+            
+            cur_predict = pd.DataFrame(cur_predict.mean(axis=1), columns=[f'{model_type}_pred'])
+            print('MAE:', np.round(np.mean(np.abs(cur_predict[f'{model_type}_pred'] - y_test)), 5))
+            cur_predict = pd.concat([cur_predict, y_test], axis=1)
+            predictions = pd.concat([predictions, cur_predict], axis=0)
+                
+        predictions = pd.merge(predictions, X,left_index=True, right_index=True)
+
+        return predictions
+
+def calc_kelly_criterion(pred):
+
+    pred['num_wins'] = pred.num_wins_pct * pred.num_trials
+    pred['avg_win_odds'] = (pred.score + pred.num_trials - pred.num_wins) / pred.num_wins
+    pred['num_wins_pct_choices'] = pred.num_correct_pct ** pred.num_choices
+
+    pred['kc_wins'] = pred.num_wins_pct - ((1-pred.num_wins_pct)/(pred.avg_win_odds-1))
+    pred['kc_num_choices'] = pred.num_wins_pct_choices - ((1-pred.num_wins_pct_choices)/(pred.avg_win_odds-1))
+    pred['kc_avg'] = pred[['kc_wins', 'kc_num_choices']].mean(axis=1)
+    pred['kc_avg'] * pred.num_trials
+
+    return pred
 
 params = {
-    'n_estimators': range(300, 550, 25),
-    'num_leaves': range(300, 650, 25),
+    'n_estimators': range(300, 600, 25),
+    'num_leaves': range(300, 750, 25),
     'min_child_samples': range(50, 400, 25),
-    'learning_rate': [0.3, 0.35, 0.4, 0.45, 0.5],
+    'learning_rate': [0.25, 0.3, 0.35, 0.4, 0.45],
     'subsample': [0.75, 0.8, 0.85, 0.9, 0.95, 1]
 }
 
-X, y_winnings, y_win_pct, y_num_correct_pct = choice_param_training_data(use_cats=True, y_var='winnings')
-winnings_pr = cross_fold_predict(X, y_winnings, params)
-win_pct_pr = cross_fold_predict(X, y_win_pct, params)
-num_correct_pct_pr = cross_fold_predict(X, y_num_correct_pct, params)
-
-win_pct_pr = win_pct_pr.rename(columns={'score': 'num_wins_pct'})
-num_correct_pct_pr = num_correct_pct_pr.rename(columns={'score': 'num_correct_pct'})
+lgbm = LGBMRegressor(n_jobs=16) 
+X, y_winnings, y_win_pct, y_num_correct_pct = choice_param_training_data(use_cats=True, max_start_spot=3)
+fp = FoldPredict(f'{root_path}/Model_Outputs/Final_LGBM/')
 
 #%%
-# join_cols = ['start_spot', 'num_choices', 'num_trials', 'value_cut_greater', 'value_cut_less', 
-#              'wt_col', 'decimal_cut_greater', 'decimal_cut_less', 
-#              'rank_order', 'include_under', 'last_date', 'ens_vers', 'bet_type',
-#              'num_matchups', 'matchup_rank', 'no_combos', 'remove_threes']
-
-# winnings_pr = winnings_pr[winnings_pr.score > 100].reset_index(drop=True)
-# win_pct_pr = win_pct_pr[win_pct_pr.num_wins_pct > 0.07].reset_index(drop=True)
-# num_correct_pct_pr = num_correct_pct_pr[num_correct_pct_pr.num_correct_pct > 0.58].reset_index(drop=True)
-
-# predictions = pd.merge(winnings_pr, win_pct_pr, on=join_cols)
-# predictions = pd.merge(predictions, num_correct_pct_pr, on=join_cols)
-
-pred= pd.merge(winnings_pr, win_pct_pr[['num_wins_pct']], left_index=True, right_index=True)
-pred = pd.merge(pred, num_correct_pct_pr[['num_correct_pct']], left_index=True, right_index=True)
-pred = pred.sort_values(by='score', ascending=False).reset_index(drop=True)
+# fp.cross_fold_train('winnings', lgbm, params, X, y_winnings, n_iter=10)
+# fp.cross_fold_train('win_pct', lgbm, params, X, y_win_pct, n_iter=10)
+# fp.cross_fold_train('num_correct_pct', lgbm, params, X, y_num_correct_pct, n_iter=10)
 
 #%%
 
-pred['num_wins'] = pred.num_wins_pct * pred.num_trials
-pred['avg_win_odds'] = (pred.score + pred.num_trials - pred.num_wins) / pred.num_wins
-pred['num_wins_pct_choices'] = pred.num_correct_pct ** pred.num_choices
+winnings_pr = fp.cross_fold_predict('winnings', X, y_winnings)
+win_pct_pr = fp.cross_fold_predict('win_pct', X, y_win_pct)
+num_correct_pct_pr = fp.cross_fold_predict('num_correct_pct', X, y_num_correct_pct)
 
-pred['kc_wins'] = pred.num_wins_pct - ((1-pred.num_wins_pct)/(pred.avg_win_odds-1))
-pred['kc_num_choices'] = pred.num_wins_pct_choices - ((1-pred.num_wins_pct_choices)/(pred.avg_win_odds-1))
-pred['kc_avg'] = pred[['kc_wins', 'kc_num_choices']].mean(axis=1)
-pred['kc_avg'] * pred.num_trials
-pred = pred.sort_values(by='score', ascending=False).reset_index(drop=True)
+pred = pd.merge(win_pct_pr[['num_wins_pct', 'win_pct_pred']], winnings_pr, left_index=True, right_index=True)
+pred = pd.merge(num_correct_pct_pr[['num_correct_pct', 'num_correct_pct_pred']], pred, left_index=True, right_index=True)
+# pred = calc_kelly_criterion(pred)
+pred = pred.sort_values(by='winnings_pred', ascending=False).reset_index(drop=True)
+
+print('Winnings MAE:', np.round(np.mean(np.abs(pred.winnings - pred.winnings_pred)), 5))
+print('R2 Score', np.round(r2_score(pred.winnings, pred.winnings_pred), 4))
+pred.plot.scatter(x='winnings', y='winnings_pred')
 
 #%%
 
-win_pct_cut = 0.07
-correct_pct_cut = 0.6
+win_pct_cut = 0.1
+correct_pct_cut = 0
+start_spot_max = 3
 
 import pprint
 best_results = {}
@@ -2277,15 +2273,23 @@ for ens_v in ['random_kbest_matt0_brier1_include2_kfold3',
               'random_full_stack_matt0_brier1_include2_kfold3', 
               'random_full_stack_ind_cats_matt0_brier1_include2_kfold3']:
     
-    best_overall = pred[(pred.ens_vers==ens_v) & (pred.num_wins_pct > win_pct_cut) & (pred.num_correct_pct > correct_pct_cut)].head(25)
-    display(best_overall)   
-    best_over = pred[(pred.include_under==0) & (pred.ens_vers==ens_v) & \
-                     (pred.num_wins_pct > win_pct_cut) & (pred.num_correct_pct > correct_pct_cut)].head(25)
-    display(best_over)
+    best_overall = (
+        pred[(pred.ens_vers==ens_v) & 
+             (pred.start_spot <= start_spot_max)]
+             ).head(25)
+    display(best_overall)  
+
+    best_cut =  (
+        pred[(pred.ens_vers==ens_v) & 
+             (pred.win_pct_pred > win_pct_cut) & 
+             (pred.num_correct_pct_pred > correct_pct_cut) & 
+             (pred.start_spot <= start_spot_max)]
+             ).head(25)
+    display(best_cut)
 
     best_results[ens_v] = {}
     best_results[ens_v]['overall'] = best_overall.iloc[0].to_dict()
-    best_results[ens_v]['over'] = best_over.iloc[0].to_dict()
+    best_results[ens_v]['with_cuts'] = best_cut.iloc[0].to_dict()
 
 pprint.pprint(best_results)
 

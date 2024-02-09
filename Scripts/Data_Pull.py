@@ -545,38 +545,38 @@ pd.merge(df, team, on='game_date')
 
 # %%
 
-# # get NBA schedule data as JSON
-# import requests
-# year = '2023'
-# r = requests.get('https://data.nba.com/data/10s/v2015/json/mobile_teams/nba/' + year + '/league/00_full_schedule.json')
-# json_data = r.json()
+# get NBA schedule data as JSON
+import requests
+year = '2023'
+r = requests.get('https://data.nba.com/data/10s/v2015/json/mobile_teams/nba/' + year + '/league/00_full_schedule.json')
+json_data = r.json()
 
-# # prepare output files
-# data = []
+# prepare output files
+data = []
 
-# # loop through each month/game and write out stats to file
-# for i in range(len(json_data['lscd'])):
-#     for j in range(len(json_data['lscd'][i]['mscd']['g'])):
-#         gamedate = json_data['lscd'][i]['mscd']['g'][j]['gdte']
-#         etm = json_data['lscd'][i]['mscd']['g'][j]['etm']
-#         stt = json_data['lscd'][i]['mscd']['g'][j]['stt']
-#         game_id = json_data['lscd'][i]['mscd']['g'][j]['gid']
-#         visiting_team = json_data['lscd'][i]['mscd']['g'][j]['v']['ta']
-#         home_team = json_data['lscd'][i]['mscd']['g'][j]['h']['ta']
-#         data.append([gamedate, etm, stt, game_id, home_team, visiting_team])
+# loop through each month/game and write out stats to file
+for i in range(len(json_data['lscd'])):
+    for j in range(len(json_data['lscd'][i]['mscd']['g'])):
+        gamedate = json_data['lscd'][i]['mscd']['g'][j]['gdte']
+        etm = json_data['lscd'][i]['mscd']['g'][j]['etm']
+        stt = json_data['lscd'][i]['mscd']['g'][j]['stt']
+        game_id = json_data['lscd'][i]['mscd']['g'][j]['gid']
+        visiting_team = json_data['lscd'][i]['mscd']['g'][j]['v']['ta']
+        home_team = json_data['lscd'][i]['mscd']['g'][j]['h']['ta']
+        data.append([gamedate, etm, stt, game_id, home_team, visiting_team])
 
-# df = pd.DataFrame(data, columns=['game_date', 'game_time', 'standard_time', 'game_id','home_team', 'away_team'])
-# team_update = {
-#                'GSW': 'GS',
-#                'PHX': 'PHO',
-#                'NOP': 'NO',
-#                'NYK': 'NY',
-#                'SAS': 'SA'
-#                }
-# for ot, nt in team_update.items():
-#     df.loc[df.home_team==ot, 'home_team'] = nt
-#     df.loc[df.away_team==ot, 'away_team'] = nt
+df = pd.DataFrame(data, columns=['game_date', 'game_time', 'standard_time', 'game_id','home_team', 'away_team'])
+team_update = {
+               'GSW': 'GS',
+               'PHX': 'PHO',
+               'NOP': 'NO',
+               'NYK': 'NY',
+               'SAS': 'SA'
+               }
+for ot, nt in team_update.items():
+    df.loc[df.home_team==ot, 'home_team'] = nt
+    df.loc[df.away_team==ot, 'away_team'] = nt
 
-# dm.write_to_db(df, 'Team_Stats', 'NBA_Schedule', 'replace')
+dm.write_to_db(df, 'Team_Stats', 'NBA_Schedule', 'replace')
 
 # %%

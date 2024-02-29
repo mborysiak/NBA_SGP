@@ -488,16 +488,16 @@ nba_stats = NBAStats()
 import time
 
 yesterday_date = dt.datetime.now().date()-dt.timedelta(1)
-# yesterday_date = dt.datetime(2023, 12, 23).date()
+# yesterday_date = dt.datetime(2024, 2, 15).date()
 
 box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score', yesterday_date)
-time.sleep(2)
+time.sleep(1)
 tracking_players, tracking_teams = nba_stats.pull_all_stats('tracking_data', yesterday_date)
-time.sleep(2)
+time.sleep(1)
 adv_players, adv_teams = nba_stats.pull_all_stats('advanced_stats', yesterday_date)
-time.sleep(2)
+time.sleep(1)
 hustle_players, hustle_teams = nba_stats.pull_all_stats('hustle_stats', yesterday_date)
-time.sleep(2)
+time.sleep(1)
 usage_players, usage_teams = nba_stats.pull_all_stats('usage_stats', yesterday_date)
 
 
@@ -530,18 +530,6 @@ for game_date in dm.read("SELECT DISTINCT game_date FROM Box_Score", 'Player_Sta
     time.sleep(5)
 
 
-
-# %%
-
-df = dm.read("SELECT * FROM Draftkings_Odds", 'Player_Stats')
-df = df.groupby('game_date').agg({'player': 'count'}).reset_index()
-
-
-# %%
-team = dm.read("SELECT * FROM Draftkings_Odds", 'Team_stats')
-team = team.groupby('game_date').agg({'team': 'count'}).reset_index()
-
-pd.merge(df, team, on='game_date')
 
 # %%
 
@@ -579,4 +567,17 @@ for ot, nt in team_update.items():
 
 dm.write_to_db(df, 'Team_Stats', 'NBA_Schedule', 'replace')
 
+# %%
+
+
+# import sqlite3
+
+# for t in ['FantasyData', 'NumberFire_Projections', 'FantasyPros', 'Draftkings_Odds']:
+#     conn = sqlite3.connect('c:/Users/borys/Downloads/Player_Stats.sqlite3')
+#     df = pd.read_sql_query(f"SELECT * FROM {t} WHERE game_date >= '2024-02-20' ", conn)
+#     dm.write_to_db(df, 'Player_Stats', t, 'append')
+
+# conn = sqlite3.connect('c:/Users/borys/Downloads/Team_Stats.sqlite3')
+# df = pd.read_sql_query(f"SELECT * FROM Draftkings_Odds WHERE game_date >= '2024-02-20' ", conn)
+# dm.write_to_db(df, 'Team_Stats', 'Draftkings_Odds', 'append')
 # %%

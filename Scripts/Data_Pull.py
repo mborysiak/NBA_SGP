@@ -487,8 +487,8 @@ nba_stats = NBAStats()
 #%%
 import time
 
-yesterday_date = dt.datetime.now().date()-dt.timedelta(1)
-# yesterday_date = dt.datetime(2024, 2, 15).date()
+# yesterday_date = dt.datetime.now().date()-dt.timedelta(1)
+yesterday_date = dt.datetime(2024, 4, 14).date()
 
 box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score', yesterday_date)
 time.sleep(1)
@@ -512,6 +512,14 @@ tnames = ['Box_Score', 'Tracking_Data', 'Advanced_Stats', 'Hustle_Stats']
 for df, tname in zip(dfs, tnames):
     dm.delete_from_db('Team_Stats', tname, f"game_date='{yesterday_date}'")
     dm.write_to_db(df, 'Team_Stats', tname, 'append')
+#%%
+
+
+# Build new features
+# Number of games in x number of rolling days
+# Number of miles traveled in x number of rolling days
+# add usage stats
+
 
 #%%
 

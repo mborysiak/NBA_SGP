@@ -44,12 +44,12 @@ run_params = {
     
     # set year and week to analyze
     'cv_time_input_back_days': 40,
-    'train_time_split': '2024-02-18',
+    'train_time_split': '2024-03-08',
     'metrics': [
-                 'points', 'assists', 'rebounds',
-                 'three_pointers','points_assists',
-                 'points_rebounds','points_rebounds_assists', 'assists_rebounds',
-                 'steals_blocks','blocks', 'steals', 
+                 #'points', 'assists', 'rebounds',
+                #   'three_pointers', 'points_assists',
+                #   'points_rebounds','points_rebounds_assists', 
+                  'assists_rebounds', 'steals_blocks','blocks', 'steals', 
                 # 'total_points', 'spread'  
                 ],
     'n_iters': 15,
@@ -609,7 +609,7 @@ for metric in run_params['metrics']:
     func_params = order_func_params(func_params, trial_times)
     
     # run all models in parallel
-    results = Parallel(n_jobs=16, verbose=verbosity)(
+    results = Parallel(n_jobs=-1, verbose=verbosity)(
                     delayed(get_model_output)
                     (m, label, df, model_obj, run_params, i, min_samples, alpha, n_iter) \
                         for m, label, df, model_obj, i, min_samples, alpha, n_iter in func_params

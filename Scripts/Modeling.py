@@ -12,8 +12,7 @@ from ff.db_operations import DataManage
 from ff import general as ffgeneral
 from skmodel import SciKitModel
 
-from hyperopt.pyll import scope
-from hyperopt import Trials, hp
+import optuna
 from wakepy import keep
 from joblib import Parallel, delayed
 import time
@@ -43,23 +42,30 @@ verbosity=50
 run_params = {
     
     # set year and week to analyze
-    'cv_time_input_back_days': 40,
-    'train_time_split': '2024-03-08',
+    'cv_time_input_back_days': 30,
+    'last_train_time_split': '2024-03-08',
+    'train_time_split': '2024-10-22',
+    
     'metrics': [
-                 #'points', 'assists', 'rebounds',
-                #   'three_pointers', 'points_assists',
-                #   'points_rebounds','points_rebounds_assists', 
-                  'assists_rebounds', 'steals_blocks','blocks', 'steals', 
-                # 'total_points', 'spread'  
+                 'points', 'assists', 'rebounds',
+                 'three_pointers', 'points_assists',
+                 'points_rebounds','points_rebounds_assists', 
+                 'assists_rebounds', 'steals_blocks','blocks', 'steals', 
+                 # 'total_points', 'spread'  
                 ],
     'n_iters': 15,
     'n_splits': 4,
     'parlay': False,
-    'opt_type': 'bayes'
+
+    'opt_type': 'optuna',
+    'hp_algo': 'tpe',
+    'num_past_trials': 100,
+    'optuna_timeout': 60*8
 }
 
 # run_params['cv_time_input'] = int(run_params['cv_time_input'].replace('-', ''))
 run_params['train_time_split'] = int(run_params['train_time_split'].replace('-', ''))
+run_params['last_train_time_split'] = int(run_params['last_train_time_split'].replace('-', ''))
 
 # set weights for running model
 r2_wt = 0
@@ -235,79 +241,97 @@ def output_dict():
     return {'pred': {}, 'actual': {}, 'scores': {}, 'models': {}, 'full_hold':{}, 'param_scores': {}, 'trials': {}}
 
 
-def get_trial_times(root_path, run_params):
+def rename_existing(old_study_db, new_study_db, study_name):
 
-    recent_save = get_newest_folder_with_keywords(f"{root_path}/Model_Outputs/", [run_params['cur_metric']], [str(run_params['train_time_split'])])
-    all_trials = load_pickle(recent_save, 'all_trials')
+    import datetime as dt
+    new_study_name = study_name + '_' + dt.datetime.now().strftime('%Y%m%d%H%M%S')
+    optuna.copy_study(from_study_name=study_name, from_storage=old_study_db, to_storage=new_study_db, to_study_name=new_study_name)
+    optuna.delete_study(study_name=study_name, storage=new_study_db)
 
-    times = []
-    for k,v in all_trials.items():
-        if k!='reg_adp':
-            max_trial = len(v.trials) - 1
-            trial_times = []
-            for i in range(max_trial-25, max_trial):
-                trial_times.append(v.trials[i]['refresh_time'] - v.trials[i]['book_time'])
-            trial_time = np.mean(trial_times).seconds
-            times.append([k, np.round(trial_time / 60, 2)])
 
-    time_per_trial = pd.DataFrame(times, columns=['model', 'time_per_trial']).sort_values(by='time_per_trial', ascending=False)
-    time_per_trial['total_time'] = time_per_trial.time_per_trial * 25
-    return time_per_trial
-
-def calc_num_trials(time_per_trial, run_params):
-
-    n_iters = run_params['n_iters']
-    time_per_trial['percentile_90_time'] = time_per_trial.time_per_trial.quantile(0.4)
-    time_per_trial['num_trials'] = n_iters * time_per_trial.percentile_90_time / time_per_trial.time_per_trial
-    time_per_trial['num_trials'] = time_per_trial.num_trials.apply(lambda x: np.min([n_iters, np.max([x, 4])])).astype('int')
+def get_new_study(old_db, new_db, old_name, new_name, num_trials):
     
-    return {k:v for k,v in zip(time_per_trial.model, time_per_trial.num_trials)}
+    old_storage = optuna.storages.RDBStorage(
+                                url=old_db,
+                                engine_kwargs={"pool_size": 64, 
+                                            "connect_args": {"timeout": 60},
+                                            },
+                                )
+    
+    new_storage = optuna.storages.RDBStorage(
+                                url=new_db,
+                                engine_kwargs={"pool_size": 64, 
+                                            "connect_args": {"timeout": 60},
+                                            },
+                                )
+    
+    if old_name is not None:
+        old_study = optuna.create_study(
+            study_name=old_name,
+            storage=old_storage,
+            load_if_exists=True
+        )
+    
+    try:
+        next_study = optuna.create_study(
+            study_name=new_name, 
+            storage=new_storage, 
+            load_if_exists=False
+        )
 
-def reg_params(df_train, min_samples, num_trials, run_params):
-    model_list = ['gbm', 'gbmh', 'rf', 'xgb', 'lgbm', 'ridge', 'svr', 'lasso', 'bridge', 'enet', 'knn']
-    label = 'reg'
+    except:
+        rename_existing(old_storage, new_storage, new_name)
+        next_study = optuna.create_study(
+            study_name=new_name, 
+            storage=new_storage, 
+            load_if_exists=False
+        )
+    
+    if old_name is not None and len(old_study.trials) > 0:
+        print(f"Loaded {new_name} study with {old_name} {len(old_study.trials)} trials")
+        next_study.add_trials(old_study.trials[-num_trials:])
+
+    return next_study
+    
+
+def get_optuna_study(label, vers, run_params):
+    time.sleep(5*np.random.random())
+    old_name = f"{label}_{vers}_{run_params['last_train_time_split']}"
+    new_name = f"{label}_{vers}_{run_params['train_time_split']}"
+    next_study = get_new_study(run_params['last_study_db'], run_params['study_db'], old_name, new_name, run_params['num_past_trials'])
+    return next_study
+
+def reg_params(df_train, min_samples, run_params):
+    model_list = ['knn','mlp', 'bridge', 'ridge', 'svr', 'lasso', 'enet', 'lgbm', 'xgb', 'gbmh', 'gbm', 'cb', 'rf']
     func_params_reg = []
+    metric = run_params['cur_metric']
     for i, m  in enumerate(model_list):
-        try: num_trial = num_trials[f'{label}_{m}']
-        except: num_trial = run_params['n_iters']
-        func_params_reg.append([m, label, df_train, 'reg', i, min_samples, '', num_trial])
+        label = f'{metric}_{m}_reg'
+        func_params_reg.append([m, label, df_train, 'reg', i, min_samples, '', run_params['n_iters']])
 
     return func_params_reg
 
-def class_params(df_train_class, min_samples, num_trials, run_params, is_parlay=False):
-    model_list = ['gbm_c', 'rf_c', 'gbmh_c', 'lgbm_c', 'lr_c', 'knn_c','xgb_c']
+def class_params(df_train_class, min_samples, run_params, is_parlay=False):
+    model_list = ['lr_c', 'knn_c', 'lgbm_c', 'xgb_c', 'mlp_c', 'gbmh_c', 'gbm_c', 'cb_c', 'rf_c'  ]
     func_params_c = []
-    if is_parlay: label = 'parlay_class'
-    else: label = 'class'
- 
+    metric = run_params['cur_metric']
     for i, m  in enumerate(model_list):
-        try: num_trial = num_trials[f'{label}_{m}']
-        except: num_trial = run_params['n_iters']
-        func_params_c.append([m, label, df_train_class, 'class', i, min_samples, '', num_trial])
+        if is_parlay: label = f'{metric}_{m}_parlay_class'
+        else: label = f'{metric}_{m}_class'
+        func_params_c.append([m, label, df_train_class, 'class', i, min_samples, '', run_params['n_iters']])
 
     return func_params_c
 
-def quant_params(df_train, alphas, min_samples, num_trials, run_params):
-    model_list =  ['qr_q', 'lgbm_q', 'gbm_q', 'gbmh_q']
+def quant_params(df_train, alphas, min_samples, run_params):
+    model_list =  ['qr_q', 'lgbm_q', 'gbm_q', 'gbmh_q', 'cb_q']
     func_params_q = []
+    metric = run_params['cur_metric']
     for alph in alphas:
-        label = f'quant_{alph}'
         for i, m  in enumerate(model_list):
-            try: num_trial = num_trials[f'{label}_{m}']
-            except: num_trial = run_params['n_iters']
-            func_params_q.append([m, label, df_train, 'quantile', i, min_samples, alph, num_trial])
+            label = f'{metric}_{m}_quant_{alph}'
+            func_params_q.append([m, label, df_train, 'quantile', i, min_samples, alph, run_params['n_iters']])
 
     return func_params_q
-
-
-def order_func_params(func_params, trial_times):
-    
-    if trial_times is not None:
-        missing_trials = [f'{x[1]}_{x[0]}' for x in func_params if f'{x[1]}_{x[0]}' not in trial_times.values]
-        trial_order = missing_trials + list(trial_times.model.values)
-        func_params = sorted(func_params, key=lambda x: trial_order.index(f'{x[1]}_{x[0]}'))
-
-    return func_params
 
 def get_skm(skm_df, model_obj, to_drop):
     
@@ -373,7 +397,9 @@ def get_full_pipe(skm, m, alpha=None, stack_model=False, min_samples=10, bayes_r
 
         if m in ('qr_q', 'gbmh_q'): pipe.set_params(**{f'{m}__quantile': alpha})
         elif m in ('rf_q', 'knn_q'): pipe.set_params(**{f'{m}__q': alpha})
+        elif m == 'cb_q': pipe.set_params(**{f'{m}__loss_function': f'Quantile:alpha={alpha}'})
         else: pipe.set_params(**{f'{m}__alpha': alpha})
+    
 
     # get the params for the current pipe and adjust if needed
     params = skm.default_params(pipe, bayes_rand, min_samples=min_samples)
@@ -384,31 +410,9 @@ def get_full_pipe(skm, m, alpha=None, stack_model=False, min_samples=10, bayes_r
                                             [ 'ProjPts', 'dk_salary','projected_points', 'fantasyPoints', 'ffa_points', 'avg_proj_points', 'fc_proj_fantasy_pts_fc', 'log_fp_rank', 'log_avg_proj_rank']
                                         ]
         params['k_best__k'] = range(1, 14)
-
-    if m in ('gbm', 'gbm_c', 'gbm_q'):
-        params[f'{m}__n_estimators'] = scope.int(hp.quniform('n_estimators', 20, 50, 2))
-        params[f'{m}__max_depth'] = scope.int(hp.quniform('max_depth', 2, 12, 2))
-        params[f'{m}__max_features'] = hp.uniform('max_features', 0.4, 0.8)
-        params[f'{m}__subsample'] = hp.uniform('subsample', 0.4, 0.8)
     
     return pipe, params
 
-def update_trials_params(trials, m, params, pipe):
-
-    m_params = [p.split('__')[1] for p in params.keys() if m in p]
-
-    hyper_params = {
-        p: pipe.steps[-1][1].get_params()[p] for p in m_params
-    }
-
-    for trial in trials:
-        # Update each trial with the new hyperparameters
-        for k,v in hyper_params.items():
-            if k not in trial['misc']['vals']:
-                trial['misc']['vals'][k] = [v]
-                trial['misc']['idxs'][k] = [trial['tid']]
-
-    return trials
 
 def get_proba(model_obj):
     if model_obj == 'class': proba = True
@@ -429,29 +433,6 @@ def get_newest_folder_with_keywords(path, keywords, ignore_keywords=None):
     
     newest_folder = max(matching_folders, key=lambda f: os.path.getctime(os.path.join(path, f)))
     return os.path.join(path, newest_folder)
-
-
-def get_trials(label, m, bayes_rand):
-
-    recent_save = get_newest_folder_with_keywords(f"{root_path}/Model_Outputs/", [run_params['cur_metric']], [str(run_params['train_time_split'])])
-
-    if recent_save is not None and bayes_rand=='bayes': 
-        try:
-            trials = load_pickle(recent_save, 'all_trials')
-            trials = trials[f'{label}_{m}']
-            print('Loading previous trials')
-        except:
-            print('No Previous Trials Exist')
-            trials = Trials()
-
-    elif bayes_rand=='bayes':
-        print('Creating new Trials object')
-        trials = Trials()
-
-    else:
-        trials = None
-
-    return trials
     
 
 def get_model_output(model_name, label, cur_df, model_obj, run_params, i, min_samples=10, alpha='', n_iter=20):
@@ -460,11 +441,10 @@ def get_model_output(model_name, label, cur_df, model_obj, run_params, i, min_sa
     
     bayes_rand = run_params['opt_type']
     proba = get_proba(model_obj)
-    trials = get_trials(label, model_name, bayes_rand)
+    trials = get_optuna_study(label, vers, run_params)
 
     skm, X, y = get_skm(cur_df, model_obj, to_drop=run_params['drop_cols'])
     pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples, bayes_rand=bayes_rand)
-    if trials is not None: trials = update_trials_params(trials, model_name, params, pipe)
 
     # fit and append the ADP model
     start = time.time()
@@ -472,7 +452,8 @@ def get_model_output(model_name, label, cur_df, model_obj, run_params, i, min_sa
                                                                      n_splits=run_params['n_splits'], col_split='game_date', 
                                                                      time_split=run_params['cv_time_input'],
                                                                      bayes_rand=bayes_rand, proba=proba, trials=trials,
-                                                                     random_seed=(i+7)*19+(i*12)+6, alpha=alpha)
+                                                                     random_seed=(i+7)*19+(i*12)+6, alpha=alpha,
+                                                                     optuna_timeout=run_params['optuna_timeout'])
     best_models = [bm.fit(X,y) for bm in best_models]
     print('Time Elapsed:', np.round((time.time()-start)/60,1), 'Minutes')
     
@@ -572,6 +553,11 @@ for metric in run_params['metrics']:
     game_dates = df.game_date.sort_values(ascending=False).unique()
     run_params['cv_time_input'] = game_dates[run_params['cv_time_input_back_days']]
 
+    if not os.path.exists(f"{root_path}/Scripts/optuna/{run_params['train_time_split']}/"):
+        os.makedirs(f"{root_path}/Scripts/optuna/{run_params['train_time_split']}/")
+    run_params['last_study_db'] = f"sqlite:///optuna/{run_params['last_train_time_split']}/train_{run_params['last_train_time_split']}.sqlite3"
+    run_params['study_db'] = f"sqlite:///optuna/{run_params['train_time_split']}/train_{run_params['train_time_split']}.sqlite3"
+
     run_params['cur_metric'] = metric
     df = remove_low_counts(df)
     df = create_y_act(df, metric)
@@ -591,22 +577,11 @@ for metric in run_params['metrics']:
     df_train_parlay, df_predict_parlay = get_over_under_class(df, metric, run_params, model_obj='class')
     df_train_diff, df_predict_diff = get_over_under_class(df, metric, run_params, model_obj='reg')
 
-    try:
-        trial_times = get_trial_times(root_path, run_params)
-        num_trials = calc_num_trials(trial_times, run_params)
-        print(trial_times)
-        print('Lower trials:', {k:v for k,v in num_trials.items() if v < run_params['n_iters']})
-    except:
-        num_trials = None
-        trial_times = None
-        print('No Trials Exist')
-
     func_params = []
-    func_params.extend(quant_params(df_train, [0.25, 0.75], min_samples,  num_trials, run_params))
-    func_params.extend(reg_params(df_train, min_samples, num_trials, run_params))
-    func_params.extend(class_params(df_train_class, int(min_samples/10), num_trials, run_params, is_parlay=False))
-    func_params.extend(class_params(df_train_parlay, int(min_samples/10), num_trials, run_params, is_parlay=True))
-    func_params = order_func_params(func_params, trial_times)
+    func_params.extend(quant_params(df_train, [0.25, 0.75], min_samples, run_params))
+    func_params.extend(reg_params(df_train, min_samples, run_params))
+    func_params.extend(class_params(df_train_class, int(min_samples/10), run_params, is_parlay=False))
+    func_params.extend(class_params(df_train_parlay, int(min_samples/10), run_params, is_parlay=True))
     
     # run all models in parallel
     results = Parallel(n_jobs=-1, verbose=verbosity)(
@@ -622,131 +597,30 @@ for metric in run_params['metrics']:
 
 #%%
 
-for m, label, df, model_obj, i, min_samples, alpha, n_iter in func_params[-1:]:
+for m, label, df, model_obj, i, min_samples, alpha, n_iter in func_params[21:22]:
 
     model_name = m
     print(model_name)
     cur_df = df.copy()
 
+    print(f'\n{model_name}\n============\n')
+    
     bayes_rand = run_params['opt_type']
     proba = get_proba(model_obj)
-    trials = get_trials(label, model_name, bayes_rand)
-    
+    trials = get_optuna_study(label, vers, run_params)
+
     skm, X, y = get_skm(cur_df, model_obj, to_drop=run_params['drop_cols'])
     pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples, bayes_rand=bayes_rand)
-    if trials is not None: trials = update_trials_params(trials, model_name, params, pipe)
 
     # fit and append the ADP model
     start = time.time()
-    best_models, oof_data, param_scores, trials = skm.time_series_cv(pipe, X, y, params, n_iter=20, 
+    best_models, oof_data, param_scores, trials = skm.time_series_cv(pipe, X, y, params, n_iter=n_iter, 
                                                                      n_splits=run_params['n_splits'], col_split='game_date', 
                                                                      time_split=run_params['cv_time_input'],
                                                                      bayes_rand=bayes_rand, proba=proba, trials=trials,
-                                                                     random_seed=(i+7)*19+(i*12)+6, alpha=alpha)
-
+                                                                     random_seed=(i+7)*19+(i*12)+6, alpha=alpha,
+                                                                     optuna_timeout=run_params['optuna_timeout'])
+    best_models = [bm.fit(X,y) for bm in best_models]
+    print('Time Elapsed:', np.round((time.time()-start)/60,1), 'Minutes')
+    
 #%%
-
-scores = load_pickle(model_output_path, 'all_param_scores')
-scores['reg_gbm'].sort_values(by='score').head(20)
-
-#%%
-
-metric = 'steals'
-
-# load data and filter down
-pkey, model_output_path = create_pkey_output_path(metric, run_params, vers)
-df, run_params = load_data(run_params)
-
-game_dates = df.game_date.sort_values(ascending=False).unique()
-run_params['cv_time_input'] = game_dates[run_params['cv_time_input_back_days']]
-
-df = remove_low_counts(df)
-df = create_y_act(df, metric)
-
-df['week'] = 1
-df['year'] = df.game_date
-df['team'] = 0
-
-df_train, df_predict, output_start, min_samples = train_predict_split(df, run_params)
-df_train['y_act'] = df_train.y_act + (np.random.random(size=len(df_train)) / 1000)
-df_train_class, df_predict_class = get_over_under_class(df, metric, run_params, model_obj='class')
-df_train_diff, df_predict_diff = get_over_under_class(df, metric, run_params, model_obj='reg')
-
-# set up blank dictionaries for all metrics
-out_reg, out_quant, out_class, out_diff = output_dict(),  output_dict(), output_dict(), output_dict()
-
-#%%
-
-# 'qr_q', 'gbmh_q'): pipe.set_params(**{f'{m}__quantile': alpha})
-#         elif m in ('rf_q', 'knn_q')
-
-cur_df = df_train.copy()
-model_obj = 'reg'
-model_name = 'lgbm'
-out_dict={}
-alpha=None
-i=50
-
-skm, X, y = get_skm(cur_df, model_obj, to_drop=run_params['drop_cols'])
-# pipe, params = get_full_pipe(skm, model_name, alpha, min_samples=min_samples, bayes_rand='bayes')
-# pipe.set_params(**{'lgbm__objective': 'tweedie'})
-
-pipe = skm.model_pipe([skm.piece('random_sample'),
-                       skm.piece('std_scale'),
-                       skm.piece('pca'),
-                       skm.piece(model_name)])
-params = skm.default_params(pipe, 'bayes', min_samples=min_samples)
-
-#%%
-if model_obj == 'class': proba = True
-else: proba = False
-
-print(f'\n{model_name}\n============\n')
-
-# fit and append the ADP model
-import time
-start = time.time()
-best_models, oof_data, _, trials = skm.time_series_cv(pipe, X, y, params, n_iter=3, trials=Trials(),
-                                                n_splits=run_params['n_splits'], col_split='game_date', 
-                                                bayes_rand='bayes', time_split=run_params['cv_time_input'],
-                                                proba=proba, random_seed=(i+7)*19+(i*12)+6, alpha=alpha)
-
-print('Time Elapsed:', np.round((time.time()-start)/60,1), 'Minutes')
-
-oof_data['full_hold'].plot.scatter(x='pred', y='y_act')
-# col_label = str(alpha)
-# out_dict = update_output_dict(model_obj, model_name, col_label, out_dict, oof_data, best_models)
-
-#%%
-
-all_df = pd.DataFrame()
-for i in range(50):
-    cur_param = pd.DataFrame(trials.trials[i]['misc']['vals'])
-    cur_loss = pd.DataFrame({'loss': trials.trials[i]['result']['loss']}, index=[0])
-    cur = pd.concat([cur_param, cur_loss], axis=1)
-    all_df = pd.concat([all_df, cur], axis=0)
-
-all_df = all_df.sort_values(by='loss').reset_index(drop=True)
-all_df
-
-#%%
-pipeline = best_models[1]
-pipeline.fit(X,y)
-
-# get the feature names from the original dataset
-feature_names = X.columns
-
-# get the indices of the selected features
-selected_features = pipeline.named_steps['k_best_c'].get_support()
-
-# filter the feature names to get only the selected features
-selected_feature_names = feature_names[selected_features]
-
-# get the sorted indices of the coefficients
-coef_indices = np.argsort(np.abs(pipeline.named_steps['lr_c'].coef_[0]))[::-1]
-
-# print the feature names and corresponding coefficients in order
-for feature, coef in zip(selected_feature_names[coef_indices], pipeline.named_steps['lr_c'].coef_[0][coef_indices]):
-    print(f'{feature}: {coef:.4f}')
-
-# %%

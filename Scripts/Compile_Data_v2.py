@@ -89,6 +89,7 @@ def fantasy_data():
                     ''', 'Player_Stats').fillna({'three_pointers_att': 0})
     fd = fd.drop(['rank'], axis=1)
     fd.columns = ['fd_' + c if c not in ('player', 'team', 'position', 'opponent', 'game_date') else c for c in fd.columns ]
+    fd.fd_minutes = fd.fd_minutes.apply(lambda x: float(str(x).split(':')[0]))
 
     return fd
 
@@ -701,14 +702,14 @@ def get_columns(df, train_date, threshold=0.05):
 
 #%%
 
-train_date = '2024-03-08'
+train_date = '2024-10-22'
 max_date = dm.read("SELECT max(game_date) FROM FantasyData", 'Player_Stats').values[0][0]
 
 df = fantasy_data()
 
 days_since_training = (dt.datetime.now() - dt.datetime.strptime(train_date, '%Y-%m-%d')).days
 game_dates = df.game_date.sort_values(ascending=False).unique()
-df = df[df.game_date.isin(game_dates[:120+days_since_training])].reset_index(drop=True)
+df = df[df.game_date.isin(game_dates[:100+days_since_training])].reset_index(drop=True)
 
 df = fantasy_pros(df)
 df = numberfire(df)

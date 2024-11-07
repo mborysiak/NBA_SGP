@@ -6,6 +6,8 @@ import requests
 import pandas as pd
 import numpy as np
 import datetime as dt
+import pytz
+import yaml
 
 from ff.db_operations import DataManage
 from ff import general as ffgeneral
@@ -19,294 +21,363 @@ dm = DataManage(db_path)
 pd.set_option('display.max_columns', None)
 pd.set_option('display.max_rows', 100)
 
+
+def read_config(file_path):
+    with open(file_path, 'r') as file:
+        config = yaml.safe_load(file)
+    return config
+
+# Assuming the config file is in the same directory as the Python script
+config_file = f'{root_path}/Scripts/config.yaml'
+config = read_config(config_file)
+
 #%%
 
-class DKScraper():
+api_key = config['api_key']
+sport = 'basketball_nba' # use the sport_key from the /sports endpoint below, or use 'upcoming' to see the next 8 games across all sports
+region = 'us' # uk | us | eu | au. Multiple can be specified if comma delimited
+odds_format = 'decimal' # decimal | american
+date_format = 'iso' # iso | unix
 
-    def __init__(self, base_url, event_group_id):
-        self.base_url = base_url
-        self.event_group_id = event_group_id
-        self.base_api = requests.get(f"{base_url}/{event_group_id}?format=json").json()
+team_map = {
+  'New York Knicks': 'NY',
+  'Cleveland Cavaliers': 'CLE',
+  'San Antonio Spurs': 'SA',
+  'Houston Rockets': 'HOU',
+  'Utah Jazz': 'UTA',
+  'Dallas Mavericks': 'DAL',
+  'Washington Wizards': 'WAS',
+  'Atlanta Hawks': 'ATL',
+  'Sacramento Kings': 'SAC',
+  'Portland Trail Blazers': 'POR',
+  'Orlando Magic': 'ORL',
+  'Indiana Pacers': 'IND',
+  'Milwaukee Bucks': 'MIL',
+  'Boston Celtics': 'BOS',
+  'Miami Heat': 'MIA',
+  'Detroit Pistons': 'DET',
+  'Memphis Grizzlies': 'MEM',
+  'Chicago Bulls': 'CHI',
+  'Toronto Raptors': 'TOR',
+  'Denver Nuggets': 'DEN',
+  'Phoenix Suns': 'PHO',
+  'Los Angeles Lakers': 'LAL',
+  'New Orleans Pelicans': 'NO',
+  'Los Angeles Clippers': 'LAC',
+  'Golden State Warriors': 'GS',
+  'Brooklyn Nets': 'BKN',
+  'Oklahoma City Thunder': 'OKC',
+  'Philadelphia 76ers': 'PHI',
+  'Charlotte Hornets': 'CHA',
+  'Minnesota Timberwolves': 'MIN'
+}
 
-    def nba_games_dk(self):
-        """
-        Scrapes current NFL game lines.
-        Returns
-        -------
-        games : dictionary containing teams, spreads, totals, moneylines, home/away, and opponent.
-        """
+class OddsAPIPull:
+
+    def __init__(self, api_key, base_url, sport, region, odds_format, date_format, historical=False):
         
-        dk_markets = self.base_api['eventGroup']['offerCategories'][0]['offerSubcategoryDescriptors'][0]['offerSubcategory']['offers']
-      
-        games = {}
-        for i in dk_markets:
-            if i[0]['outcomes'][0]['oddsDecimal'] == 0: # Skip this if there is no spread
-                continue
-            away_team = i[0]['outcomes'][0]['label']
-            home_team = i[0]['outcomes'][1]['label']
-            
-            if away_team not in games: 
-                # Gotta be a better way then a bunch of try excepts
-                games[away_team] = {'is_home': 0}
-                try:
-                    games[away_team]['moneyline'] = i[2]['outcomes'][0]['oddsDecimal']
-                except:
-                    pass
-                try:
-                    games[away_team]['spread'] = [i[0]['outcomes'][0]['line'],
-                                                   i[0]['outcomes'][0]['oddsDecimal']]
-                except:
-                    pass
-                try:
-                    games[away_team]['over'] = [i[1]['outcomes'][0]['line'],
-                                                i[1]['outcomes'][0]['oddsDecimal']]
-                except:
-                    pass
-                try:
-                    games[away_team]['under'] = [i[1]['outcomes'][1]['line'],
-                                                 i[1]['outcomes'][1]['oddsDecimal']]
-                except:
-                    pass
-                games[away_team]['opponent'] = home_team
-            
-            if home_team not in games:
-                games[home_team] = {'is_home': 1}
-                try:
-                    games[home_team]['moneyline'] = i[2]['outcomes'][1]['oddsDecimal']
-                except:
-                    pass
-                try:
-                    games[home_team]['spread'] = [i[0]['outcomes'][1]['line'],
-                                                  i[0]['outcomes'][1]['oddsDecimal']]
-                except:
-                    pass
-                try:
-                    games[home_team]['over'] = [i[1]['outcomes'][0]['line'],
-                                                i[1]['outcomes'][0]['oddsDecimal']]
-                except:
-                    pass
-                try:
-                    games[home_team]['under'] = [i[1]['outcomes'][1]['line'],
-                                                 i[1]['outcomes'][1]['oddsDecimal']]
-                except:
-                    pass     
-                games[home_team]['opponent'] = away_team
+        self.api_key = api_key
+        self.sport = sport
+        self.region = region
+        self.odds_format = odds_format
+        self.date_format = date_format
+        self.historical = historical
 
-        game_list = []
-        for k, v in games.items():
-            try:
-                cur_game = [k, v['opponent'], v['is_home'], v['moneyline']]
-                cur_game.extend(v['spread'])
-                cur_game.extend(v['over'])
-                cur_game.extend(v['under'])
-                game_list.append(cur_game)
-            except:
-                print(f"{k} vs {v['opponent']}", ' failed')
+        if self.historical: 
+            self.base_url = f'{base_url}/historical/sports/'
+            self.game_date = start_time.date().strftime('%Y-%m-%d')
+        else: 
+            self.base_url = f'{base_url}/sports/'
+            self.game_date = dt.datetime.now().date().strftime('%Y-%m-%d')
 
-        game_df = pd.DataFrame(game_list)
-        game_df.columns = ['team', 'opponent', 'is_home', 'moneyline_odds', 'spread', 
-                           'spread_odds', 'over', 'over_odds', 'under', 'under_odds']
+    def get_response(self, r_pull):
+        if r_pull.status_code != 200:
+            print(f'Failed to get odds: status_code {r_pull.status_code}, response body {r_pull.text}')
+        else:
+            r_json = r_pull.json()
+            print('Number of events:', len(r_json))
+            print('Remaining requests', r_pull.headers['x-requests-remaining'])
+            print('Used requests', r_pull.headers['x-requests-used'])
+
+        return r_json
+
+    @staticmethod
+    def convert_utc_to_est(est_dt):
         
-        game_df.loc[game_df.team.str.contains('Clipper'), 'team'] = 'LAC'
-        game_df.loc[game_df.team.str.contains('Laker'), 'team'] = 'LAL'
+        # Define the EST timezone
+        est = pytz.timezone('US/Eastern')
 
-        game_df.team = game_df.team.apply(lambda x: x.split(' ')[0])                
-        game_df.opponent = game_df.opponent.apply(lambda x: x.split(' ')[0])
-        return game_df
+        # Localize the datetime object to EST
+        local_time_est = est.localize(est_dt)
+
+        # Convert the localized datetime to UTC
+        utc_time = local_time_est.astimezone(pytz.utc)
+        
+        return utc_time.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-    def get_offer_cats(self):
-        offer_cats = {}
-        cat_json = self.base_api['eventGroup']['offerCategories']
 
-        keep_cats = ['Player Points', 'Player Rebounds', 'Player Assists', 'Player Threes', 'Player Combos', 'Player Blocks/Steals', 'Player Defense']
-        for i in range(1,len(cat_json)):
-            if cat_json[i]['name'] in keep_cats:
-                offer_cats[cat_json[i]['name']] = cat_json[i]['offerCategoryId']
+    def pull_events(self, start_time, end_time):
 
-        return offer_cats
+        if self.historical: self.game_date = start_time.date().strftime('%Y-%m-%d')
+        else: self.game_date = dt.datetime.now().date().strftime('%Y-%m-%d') 
+        
+        if start_time is not None: start_time = self.convert_utc_to_est(start_time)
+        if end_time is not None: end_time = self.convert_utc_to_est(end_time)
+
+        get_params = {
+                'api_key': self.api_key,
+                'regions': self.region,
+                'oddsFormat': self.odds_format,
+                'dateFormat': self.date_format,
+                'commenceTimeFrom': start_time,
+                'commenceTimeTo': end_time
+            }
+        
+        if self.historical:
+            get_params['date'] = start_time
+            self.start_time = start_time
+
+        events = requests.get(
+            f'{self.base_url}/{self.sport}/events',
+            params=get_params
+            )
+        
+        events_json = self.get_response(events)
+        if self.historical: events_json = events_json['data']
+
+        events_df = pd.DataFrame()
+        for e in events_json:
+            events_df = pd.concat([events_df, pd.DataFrame(e, index=[0])], axis=0)
+        
+        events_df['game_date'] = self.game_date
+        events_df = events_df.rename(columns={'id': 'event_id'})
+
+        return events_df.reset_index(drop=True)
     
 
-    def nba_props_dk(self):
-        props = {}
-        offer_cats = self.get_offer_cats()
+    def pull_lines(self, markets, event_id):
 
-        for cat in offer_cats.values():
-            dk_api = requests.get(f"{self.base_url}/{self.event_group_id}/categories/{cat}?format=json").json()
-            for i in dk_api['eventGroup']['offerCategories']:
-                if 'offerSubcategoryDescriptors' in i:
-                    dk_markets = i['offerSubcategoryDescriptors']
-            
-            subcategoryIds = []# Need subcategoryIds first
-            for i in dk_markets:
-                subcategoryIds.append(i['subcategoryId'])
-                        
-            for ids in subcategoryIds:
-                dk_api = requests.get(f"{self.base_url}/{self.event_group_id}/categories/{cat}/subcategories/{ids}?format=json").json()
-                for i in dk_api['eventGroup']['offerCategories']:
-                    if 'offerSubcategoryDescriptors' in i:
-                        dk_markets = i['offerSubcategoryDescriptors']
+        get_params={
+                    'api_key': self.api_key,
+                    'regions': self.region,
+                    'markets': markets,
+                    'oddsFormat': self.odds_format,
+                    'dateFormat': self.date_format,
+                }
+       
+        if self.historical:
+            get_params['date'] = self.start_time
+
+        odds = requests.get(
+                f'{self.base_url}/{self.sport}/events/{event_id}/odds',
+                params = get_params
+            )
+        
+        odds_json = self.get_response(odds)
+        if self.historical: odds_json = odds_json['data']
+
+        props = pd.DataFrame()
+        for odds in odds_json['bookmakers']:
+            bookmaker = odds['key']
+            market_props = odds['markets']
+            for cur_prop in market_props:
+                p = pd.DataFrame(cur_prop['outcomes'])
+                p['bookmaker'] = bookmaker
+                p['prop_type'] = cur_prop['key']
+                p['event_id'] = event_id
+
+                if cur_prop['key'] in ('spreads', 'h2h'):
+                    p = p.rename(columns={'name': 'description'})
+
+                props = pd.concat([props, p], axis=0)
                 
-                for i in dk_markets:
-                    if 'offerSubcategory' in i:
-                        market = i['name']
-                        for j in i['offerSubcategory']['offers']:
-                            for k in j:
-                                if 'participant' in k['outcomes'][0]:
-                                    player = k['outcomes'][0]['participant']
-                                else:
-                                    continue
-                                
-                                if player not in props:
-                                    props[player] = {}
-                                    
-                                try:
-                                    props[player][market] = {'over':[k['outcomes'][0]['line'],
-                                                                     k['outcomes'][0]['oddsDecimal']],
-                                                             'under':[k['outcomes'][1]['line'],
-                                                                     k['outcomes'][1]['oddsDecimal']]}
-                                except:
-                                    pass
-                
+
+        props = props.reset_index(drop=True)
+        props['game_date'] = self.game_date
+
+        return props
+
+    def all_market_odds(self, markets, events_df):
+
+        props = pd.DataFrame()
+        for event_id in events_df.event_id.values:
+            try:
+                print(event_id)
+                cur_props = self.pull_lines(markets, event_id)
+                props = pd.concat([props, cur_props], axis=0)
+            except:
+                print(f'Failed to get data for event_id {event_id}')
+
         return props
     
-    @staticmethod
-    def clean_stat_cat(df):
-        stat_map = {
-                'Points': 'points', 
-                'Points - 1st Quarter': 'points_first_quarter', 
-                'Rebounds': 'rebounds',
-                'Rebounds - 1st Quarter': 'rebounds_first_quarter', 
-                'Assists': 'assists', 
-                'Pts + Reb + Ast': 'points_rebounds_assists',
-                'Pts + Reb': 'points_rebounds', 
-                'Pts + Ast': 'points_assists', 
-                'Ast + Reb': 'assists_rebounds',
-                'Assists + Rebounds': 'assists_rebounds', 
-                'Blocks': 'blocks', 
-                'Steals': 'steals',
-                'Steals + Blocks': 'steals_blocks', 
-                'Threes': 'three_pointers', 
-                'Assists - 1st Quarter': 'assists_first_quarter'
-            }
-        df.stat_type = df.stat_type.apply(lambda x: x.lstrip().rstrip())
-        df.stat_type = df.stat_type.map(stat_map)
+hist_period = 0#(24*8) + 2
+pull_historical = False
 
-        return df
+base_url = 'https://api.the-odds-api.com/v4/'
+odds_api = OddsAPIPull(api_key, base_url, sport, region, odds_format, date_format, historical=pull_historical)
 
-    def dict_to_df(self, props):
-        players = []
-        stats_types = []
-        over_unders = []
-        ou_values = []
-        decimal_odds = []
+start_time = dt.datetime.now() - dt.timedelta(hours=hist_period)
+end_time = (dt.datetime.now() + dt.timedelta(hours=12 - hist_period))
 
-        for cur_player in props.keys():
-            for cur_stat_type in props[cur_player].keys():
-                for cur_ou, v in props[cur_player][cur_stat_type].items():
-                    players.append(cur_player)
-                    stats_types.append(cur_stat_type)
-                    over_unders.append(cur_ou)
-                    ou_values.append(v[0])
-                    decimal_odds.append(v[1])
+events_df = odds_api.pull_events(start_time=start_time, end_time=end_time)
+events_df
 
-        df = pd.DataFrame({
-                    'player': players,
-                    'stat_type': stats_types,
-                    'over_under': over_unders,
-                    'value': ou_values,
-                    'decimal_odds': decimal_odds
-                    })
-        df = self.clean_stat_cat(df)
-        return df
-    
+#%%
+
+dm.delete_from_db('Team_Stats', 'Game_Events', f"game_date='{odds_api.game_date}'", create_backup=False)
+dm.write_to_db(events_df, 'Team_Stats', 'Game_Events', 'append')
+
+#%%
+stats = [
+         'player_points', 'player_rebounds', 'player_assists', 'player_steals', 
+         'player_blocks', 'player_threes', 'player_blocks_steals', 'player_turnovers', 
+         'player_points_rebounds_assists', 'player_points_rebounds', 
+         'player_points_assists', 'player_rebounds_assists'
+         ]
+
+markets = ','.join(stats)
+player_props = odds_api.all_market_odds(markets, events_df)
+player_props
+
+#%%
+
+stats = ['spreads', 'h2h', 'totals']
+markets = ','.join(stats)
+team_props = odds_api.all_market_odds(markets, events_df)
+team_props
+
+#%%
+
+dm.delete_from_db('Team_Stats', 'Game_Odds', f"game_date='{odds_api.game_date}'", create_backup=False)
+dm.write_to_db(team_props, 'Team_Stats', 'Game_Odds', 'append')
+
+dm.delete_from_db('Player_Stats', 'Game_Odds', f"game_date='{odds_api.game_date}'", create_backup=False)
+dm.write_to_db(player_props, 'Player_Stats', 'Game_Odds', 'append')
+
+#%%
+
+df = dm.read(f'''SELECT description player,
+                        prop_type stat_type,
+                        name over_under,
+                        point value,
+                        price decimal_odds,
+                        game_date
+                FROM Game_Odds 
+                WHERE bookmaker='draftkings'
+                      AND game_date='{odds_api.game_date}'
+             ''', 'Player_Stats')
+df.stat_type = df.stat_type.apply(lambda x: x.replace('player_', ''))
+df.loc[df.stat_type=='threes', 'stat_type'] = 'three_pointers'
+df.loc[df.stat_type=='rebounds_assists', 'stat_type'] = 'assists_rebounds'
+df.loc[df.stat_type=='blocks_steals', 'stat_type'] = 'steals_blocks'
+
+dm.delete_from_db('Player_Stats', 'Draftkings_Odds', f"game_date='{odds_api.game_date}'", create_backup=False)
+dm.write_to_db(df, 'Player_Stats', 'Draftkings_Odds', 'append')
+
+
+#%%
+df = dm.read(f'''SELECT * 
+                FROM Game_Odds
+                JOIN (
+                     SELECT event_id, home_team, away_team, game_date
+                     FROM Game_Events
+                     WHERE game_date='{odds_api.game_date}' 
+                     ) USING (event_id, game_date)
+                WHERE bookmaker='draftkings'
+                      AND prop_type IN ('spreads', 'h2h')
+                ''', 'Team_Stats')
+
+df = df.pivot_table(index=['description', 'game_date', 'home_team', 'away_team'], 
+                    columns='prop_type', values=['price', 'point'], aggfunc='first').reset_index()
+
+df.columns = [f"{c[0]}_{c[1]}" if c[1]!='' else c[0] for c in df.columns]
+df['opponent'] = np.where(df.home_team==df.description, df.away_team, df.home_team)
+df['is_home'] = np.where(df.home_team==df.description, 1, 0)
+df = df.rename(columns={'description': 'team',
+                        'point_spreads': 'spread',
+                        'price_spreads': 'spread_odds',
+                        'price_h2h': 'moneyline_odds'})
+
+over_under = dm.read(f'''SELECT * 
+                         FROM Game_Odds
+                         JOIN (
+                            SELECT event_id, home_team, away_team, game_date
+                            FROM Game_Events
+                            WHERE game_date='{odds_api.game_date}' 
+                            ) USING (event_id, game_date)
+                         WHERE bookmaker='draftkings'
+                               and prop_type='totals'
+                        ''', 'Team_Stats')
+
+over_under = over_under.pivot_table(index=['game_date', 'home_team', 'away_team'],
+                                    columns='name', values=['price', 'point'], aggfunc='first').reset_index()
+over_under.columns = [f"{c[0]}_{c[1]}" if c[1]!='' else c[0] for c in over_under.columns]
+over_under = over_under.rename(columns={'point_Over': 'over',
+                                        'price_Over': 'over_odds',
+                                        'point_Under': 'under',
+                                        'price_Under': 'under_odds'})
+
+df = df.merge(over_under, on=['game_date', 'home_team', 'away_team'], how='left')
+df = df[['team', 'opponent', 'is_home', 'moneyline_odds', 'spread',
+         'spread_odds', 'over', 'over_odds', 'under', 'under_odds', 'game_date']]
+
+df.team = df.team.map(team_map)
+df.opponent = df.opponent.map(team_map)
+
+dm.delete_from_db('Team_Stats', 'Draftkings_Odds', f"game_date='{odds_api.game_date}'", create_backup=False)
+dm.write_to_db(df, 'Team_Stats', 'Draftkings_Odds', 'append')
+
+#%%
+
+
+
+
 #%%
 fname = 'fantasy-basketball-projections.csv'
 
 today_date = dt.datetime.now().date()
-# today_date = dt.date(2023, 11, 15)
+# today_date = dt.date(2024, 10, 28)
 date_str = today_date.strftime('%Y%m%d')
+dl_files = os.listdir('/Users/borys/Downloads')
+dl_files = [f for f in dl_files if 'fantasy-basketball-projections' in f]
+os.rename(f"/Users/borys/Downloads/{dl_files[0]}", f"/Users/borys/Downloads/{fname}")
+
 try: os.replace(f"/Users/borys/Downloads/{fname}", 
                 f"{root_path}/Data/OtherData/FantasyData/{date_str}_{fname}")
 except: pass
 
 df = pd.read_csv(f"{root_path}/Data/OtherData/FantasyData/{date_str}_{fname}").dropna(axis=0)
 
-df = df.rename(columns={'Name': 'player',
-                        'Rank': 'rank',
-                        'Team': 'team',
-                        'Position': 'position',
-                        'Opponent': 'opponent',
-                        'Points': 'points',
-                        'Rebounds': 'rebounds',
-                        'Assists': 'assists',
-                        'Steals': 'steals',
-                        'BlockedShots': 'blocks',
-                        'FieldGoalsPercentage': 'fg_pct',
-                        'FreeThrowsPercentage': 'ft_pct',
-                        'ThreePointersPercentage': 'three_point_pct',
-                        'FreeThrowsMade': 'ft_made',
-                        'TwoPointersMade': 'two_point_made',
-                        'ThreePointersMade': 'three_pointers',
-                        'Turnovers': 'turnovers',
-                        'Minutes': 'minutes',
-                        'FantasyPoints': 'fantasy_points'})
+df = df.rename(columns={'rank': 'rank',
+                        'player': 'player',
+                        'team': 'team',
+                        'pos': 'position',
+                        'opp': 'opponent',
+                        'pts': 'points',
+                        'reb': 'rebounds',
+                        'ast': 'assists',
+                        'stl': 'steals',
+                        'blk': 'blocks',
+                        'fg_pct': 'fg_pct',
+                        'ft_pct': 'ft_pct',
+                        'fg3_pct': 'three_point_pct',
+                        'ftm': 'ft_made',
+                        'fgm': 'two_point_made',
+                        'fg3m': 'three_pointers',
+                        'tov': 'turnovers',
+                        'toc': 'minutes',
+                        'fpts': 'fantasy_points'})
 
 df['game_date'] = today_date
 
 df.player = df.player.apply(dc.name_clean)
 df.team = df.team.apply(lambda x: x.lstrip().rstrip())
 df[['fg_pct', 'ft_pct']] = df[['fg_pct', 'ft_pct']] / 100
+df = df.drop(['id', 'gs'], axis=1)
 
 dm.delete_from_db('Player_Stats', 'FantasyData', f"game_date='{today_date}'", create_backup=False)
 dm.write_to_db(df, 'Player_Stats', 'FantasyData', if_exist='append')
-
-#%%
-
-player_teams = dm.read('''SELECT player, team
-                          FROM (
-                          SELECT player, team,
-                                 row_number() OVER (PARTITION BY player ORDER BY game_date DESC) AS rn 
-                          FROM FantasyData 
-                          ) 
-                          WHERE rn = 1''', 'Player_Stats')
-
-schedule = dm.read("SELECT * FROM NBA_Schedule", 'Team_Stats')
-schedule.game_time = pd.to_datetime(schedule.game_time)
-today = dt.datetime.now() 
-tomorrow = dt.datetime.now() + dt.timedelta(hours=12)
-schedule = schedule[(schedule.game_time > today) & (schedule.game_time < tomorrow)]
-teams = schedule[['game_time', 'home_team', 'away_team']].melt(id_vars='game_time', value_name='team')[['game_time', 'team']]
-player_teams = pd.merge(player_teams, teams, on='team')
-
-
-#%%
-nba_scrape = DKScraper(base_url='https://sportsbook.draftkings.com//sites/US-NJ-SB/api/v5/eventgroups/', event_group_id=42648)
-props = nba_scrape.nba_props_dk()
-props_df = nba_scrape.dict_to_df(props)
-props_df['game_date'] = dt.datetime.now().date()
-props_df.player = props_df.player.apply(dc.name_clean)
-props_df = pd.merge(props_df, player_teams, on='player')
-props_df = props_df.drop(['team', 'game_time'], axis=1)
-props_df.head(25)
-
-#%%
-games_df = nba_scrape.nba_games_dk()
-games_df['game_date'] = dt.datetime.now().date()
-games_df.head(16)
-
-# %%
-
-last_run = dm.read(f"SELECT * FROM Draftkings_Odds WHERE game_date='{dt.datetime.now().date()}'", 'Player_Stats')
-last_run = last_run[~last_run.player.isin(props_df.player.unique())]
-props_df = pd.concat([props_df, last_run], axis=0)
-
-dm.delete_from_db('Player_Stats', 'Draftkings_Odds', f"game_date='{dt.datetime.now().date()}'", create_backup=True)
-dm.write_to_db(props_df, 'Player_Stats', 'Draftkings_Odds', 'append')
-
-dm.delete_from_db('Team_Stats', 'Draftkings_Odds', f"game_date='{dt.datetime.now().date()}'", create_backup=True)
-dm.write_to_db(games_df, 'Team_Stats', 'Draftkings_Odds', 'append')
-
 
 #%%
 
@@ -318,7 +389,10 @@ def name_extract(col):
     col = [c for c in col if c!='']
     return ' '.join(col[2:4])
 
-df = pd.read_html('https://www.numberfire.com/nba/daily-fantasy/daily-basketball-projections')[3]
+import requests
+from io import StringIO
+
+df = pd.read_html(StringIO(requests.get('https://www.numberfire.com/nba/daily-fantasy/daily-basketball-projections', verify=False).text))[3]
 df.columns = [c[1] for c in df.columns]
 df.Player = df.Player.apply(name_extract)
 df.Player = df.Player.apply(dc.name_clean)
@@ -345,9 +419,13 @@ dm.write_to_db(df, 'Player_Stats', 'NumberFire_Projections', 'append')
 
 
 #%%
+
 import os
 today_month = dt.datetime.now().month
 today_day = str(dt.datetime.now().day).zfill(2)
+today_year = dt.datetime.now().year
+
+game_date = dt.datetime.now().date()
 fname = f'FantasyPros_NBA_Daily_Fantasy_Basketball_Projections_({today_month}_{today_day})_.csv'
 
 try: os.replace(f"/Users/borys/Downloads/{fname}", 
@@ -358,12 +436,12 @@ df = pd.read_csv(f'{root_path}/Data/OtherData/Fantasy_Pros/{fname}').dropna(axis
 df.columns = ['player', 'team', 'position', 'opponent', 'points', 'rebounds', 
               'assists', 'blocks', 'steals', 'fg_pct', 'ft_pct', 'three_pointers', 'games_played', 'minutes', 'turnovers']
 
-df['game_date'] = dt.datetime.now().date()
+df['game_date'] = game_date
 
 df.player = df.player.apply(dc.name_clean)
 df.team = df.team.apply(lambda x: x.lstrip().rstrip())
 
-dm.delete_from_db('Player_Stats', 'FantasyPros', f"game_date='{dt.datetime.now().date()}'", create_backup=False)
+dm.delete_from_db('Player_Stats', 'FantasyPros', f"game_date='{game_date}'", create_backup=False)
 dm.write_to_db(df, 'Player_Stats', 'FantasyPros', if_exist='append')
 
 #%%
@@ -487,8 +565,9 @@ nba_stats = NBAStats()
 #%%
 import time
 
-# yesterday_date = dt.datetime.now().date()-dt.timedelta(1)
-yesterday_date = dt.datetime(2024, 4, 14).date()
+yesterday_date = dt.datetime.now().date()-dt.timedelta(1)
+# for i in range(22, 30):
+#     yesterday_date = dt.datetime(2024, 10, i).date()
 
 box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score', yesterday_date)
 time.sleep(1)
@@ -512,14 +591,14 @@ tnames = ['Box_Score', 'Tracking_Data', 'Advanced_Stats', 'Hustle_Stats']
 for df, tname in zip(dfs, tnames):
     dm.delete_from_db('Team_Stats', tname, f"game_date='{yesterday_date}'")
     dm.write_to_db(df, 'Team_Stats', tname, 'append')
-#%%
 
+
+#%%
 
 # Build new features
 # Number of games in x number of rolling days
 # Number of miles traveled in x number of rolling days
 # add usage stats
-
 
 #%%
 

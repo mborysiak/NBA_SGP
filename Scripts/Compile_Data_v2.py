@@ -702,7 +702,7 @@ def get_columns(df, train_date, threshold=0.05):
 
 #%%
 
-train_date = '2024-10-22'
+train_date = '2024-11-11'
 max_date = dm.read("SELECT max(game_date) FROM FantasyData", 'Player_Stats').values[0][0]
 
 df = fantasy_data()
@@ -846,28 +846,31 @@ df = add_proj_market_share(df)
 box_score = get_box_score()
 df = remove_no_minutes(df, box_score)
 df = add_last_game_box_score(df, box_score)
-df = box_score_rolling(df, box_score)
-df = remove_low_minutes(df, box_score)
+# df = box_score_rolling(df, box_score)
+# df = remove_low_minutes(df, box_score)
 
-df = available_stats(df, missing)
-print('available stats:', df.shape)
+# df = available_stats(df, missing)
+# print('available stats:', df.shape)
 
-team_df = team_proj(df)
-team_df = add_team_box_score(team_df, 'team')
-team_df = add_team_box_score(team_df, 'opponent')
-team_df = add_team_advanced_stats(team_df, 'team')
-team_df = add_team_advanced_stats(team_df, 'opponent')
-team_df = add_team_tracking(team_df, 'team')
-team_df = add_team_tracking(team_df, 'opponent')
-team_df = add_dk_team_lines(team_df)
+# team_df = team_proj(df)
+# team_df = add_team_box_score(team_df, 'team')
+# team_df = add_team_box_score(team_df, 'opponent')
+# team_df = add_team_advanced_stats(team_df, 'team')
+# team_df = add_team_advanced_stats(team_df, 'opponent')
+# team_df = add_team_tracking(team_df, 'team')
+# team_df = add_team_tracking(team_df, 'opponent')
+# team_df = add_dk_team_lines(team_df)
 
-team_df = add_team_y_act(team_df)
-team_df = remove_low_corrs(team_df, threshold=0.05)
+# team_df = add_team_y_act(team_df)
+# team_df = remove_low_corrs(team_df, threshold=0.05)
 
 
-dm.write_to_db(team_df.iloc[:,:2000], 'Model_Features', f'Team_Model_Data_{train_date}', if_exist='replace')
-if df.shape[1] > 2000:
-    dm.write_to_db(team_df.iloc[:,2000:], 'Model_Features', f'Team_Model_Data_{train_date}v2', if_exist='replace')
+# dm.write_to_db(team_df.iloc[:,:2000], 'Model_Features', f'Team_Model_Data_{train_date}', if_exist='replace')
+# if df.shape[1] > 2000:
+#     dm.write_to_db(team_df.iloc[:,2000:], 'Model_Features', f'Team_Model_Data_{train_date}v2', if_exist='replace')
+
+df.groupby(['player', 'game_date']).size().sort_values(ascending=False)
+
 # %%
 
 team_df[['team', 'opponent', 'game_date', 'y_act_team_pts', 'y_act_opponent_pts', 'y_act_spread', 'spread', 'y_act_over_spread']]

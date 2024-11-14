@@ -1,5 +1,16 @@
 #%%
 
+# # If starting a new year, use this code to initiate the database
+# old_year = 2024
+# new_year = 2025
+
+# df = dm.read("SELECT * FROM Stack_Model_Predict LIMIT 0", f'Stack_Predict_{old_year}')
+# dm.write_to_db(df, f'Stack_Predict_{new_year}', 'Stack_Model_Predict', 'replace', create_backup=False)
+
+# df = dm.read("SELECT * FROM Stack_Model_Predict_Staging LIMIT 0", f'Stack_Predict_{old_year}')
+# dm.write_to_db(df, f'Stack_Predict_{new_year}', 'Stack_Model_Predict_Staging', 'replace', create_backup=False)
+
+#%%
 # core packages
 import pandas as pd
 import numpy as np
@@ -200,11 +211,6 @@ def load_pickle(path, fname):
 #---------------
 
 run_params = {
-    
-    # set year and week to analyze
-    'last_train_date_orig': '2024-01-18',
-    'train_date_orig': '2024-03-08',
-    'test_time_split_orig': dt.date.today().strftime('%Y-%m-%d'),
 
     # opt params
     'opt_type': 'bayes',
@@ -218,16 +224,12 @@ run_params = {
 
 }
 
-
 r2_wt = 0
 sera_wt = 0
-mse_wt = 0
-mae_wt = 1
+mse_wt = 1
+mae_wt = 0
 brier_wt = 1
 matt_wt = 0
-
-alpha = 80
-class_cut = 80
 
 #============
 # Choice Dictionary Management
@@ -671,19 +673,21 @@ def calc_stack_model(dbname, tablename, last_run_date, ens_vers, past_runs, wt_c
 #-------------
 save_tablename = 'Stack_Model_Predict_Staging'
 last_run_tablename = 'Stack_Model_Predict'
-db_stack_predict = 'Stack_Predict_2024'
+db_stack_predict = 'Stack_Predict_2025'
+db_stack_predict_last = 'Stack_Predict_2024'
 reset_table('Stack_Model_Predict_Staging', 'Stack_Model_Predict_Staging', db_stack_predict)
 
 #--------------
 # Set Params
 #--------------
-for ens_vers in ['random_kbest_matt0_brier1_include2_kfold3', 
-                 'random_full_stack_matt0_brier1_include2_kfold3',
-                 'random_full_stack_ind_cats_matt0_brier1_include2_kfold3'
-                 ]:
+for ens_vers in [
+    'random_kbest_matt0_brier1_include2_kfold3', 
+    #  'random_full_stack_matt0_brier1_include2_kfold3',
+    #  'random_full_stack_ind_cats_matt0_brier1_include2_kfold3'
+    ]:
     
-    past_runs = get_past_runs(ens_vers, tablename=last_run_tablename, foldername='pick_choices', dbname=db_stack_predict)
-    last_run_date = find_last_run(ens_vers, tablename=last_run_tablename, dbname=db_stack_predict)
+    past_runs = get_past_runs(ens_vers, tablename=last_run_tablename, foldername='pick_choices', dbname=db_stack_predict_last)
+    last_run_date = find_last_run(ens_vers, tablename=last_run_tablename, dbname=db_stack_predict_last)
     print('Last Run Date', last_run_date)
 
     wt_col_list=[None, 'decimal_odds', 'decimal_odds_twomax']
@@ -698,14 +702,16 @@ for ens_vers in ['random_kbest_matt0_brier1_include2_kfold3',
     # Run
     #------------
 
-    # for wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less in iter_cats[:1]:
-    #     calc_stack_model(save_tablename, last_run_tablename, ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less)
+    for wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less in iter_cats[:1]:
+        calc_stack_model(db_stack_predict, save_tablename, last_run_tablename, ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less)
 
-    out = Parallel(n_jobs=-1, verbose=50)(
-        delayed(calc_stack_model)
-        (db_stack_predict, save_tablename, last_run_date, ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less) 
-        for wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less in iter_cats
-    )
+    # out = Parallel(n_jobs=-1, verbose=50)(
+    #     delayed(calc_stack_model)
+    #     (db_stack_predict, save_tablename, last_run_date, ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less) 
+    #     for wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less in iter_cats
+    # )
+
+#%%
 
 #------------
 # Transfer from Staging to Prod
@@ -784,7 +790,7 @@ def run_past_choices(db_stack_predict, db_results, pull_tablename, save_tablenam
 pull_tablename = 'Stack_Model_Predict_Staging'
 save_tablename = 'Probability_Choices_Staging'
 db_results = 'Results'
-db_stack_predict = 'Stack_Predict_2024'
+db_stack_predict = 'Stack_Predict_2025'
 reset_table('Probability_Choices_Staging', 'Probability_Choices_Staging', db_results)
 
 #--------------

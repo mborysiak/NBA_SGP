@@ -43,8 +43,8 @@ run_params = {
     
     # set year and week to analyze
     'cv_time_input_back_days': 30,
-    'last_train_time_split': '2024-03-08',
-    'train_time_split': '2024-10-22',
+    'last_train_time_split': '2024-10-22',
+    'train_time_split': '2024-11-11',
     
     'metrics': [
                  'points', 'assists', 'rebounds',

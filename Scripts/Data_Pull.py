@@ -30,6 +30,7 @@ def read_config(file_path):
 # Assuming the config file is in the same directory as the Python script
 config_file = f'{root_path}/Scripts/config.yaml'
 config = read_config(config_file)
+          
 
 #%%
 
@@ -211,7 +212,7 @@ class OddsAPIPull:
 
         return props
     
-hist_period = 0#(24*8) + 2
+hist_period = 0
 pull_historical = False
 
 base_url = 'https://api.the-odds-api.com/v4/'
@@ -260,17 +261,24 @@ dm.write_to_db(player_props, 'Player_Stats', 'Game_Odds', 'append')
 df = dm.read(f'''SELECT description player,
                         prop_type stat_type,
                         name over_under,
-                        point value,
-                        price decimal_odds,
+                        AVG(point) value,
+                        AVG(price) decimal_odds,
                         game_date
                 FROM Game_Odds 
                 WHERE bookmaker='draftkings'
                       AND game_date='{odds_api.game_date}'
+                GROUP BY description, 
+                         prop_type, 
+                         over_under,
+                         game_date
              ''', 'Player_Stats')
+df.player = df.player.apply(dc.name_clean)
 df.stat_type = df.stat_type.apply(lambda x: x.replace('player_', ''))
 df.loc[df.stat_type=='threes', 'stat_type'] = 'three_pointers'
 df.loc[df.stat_type=='rebounds_assists', 'stat_type'] = 'assists_rebounds'
 df.loc[df.stat_type=='blocks_steals', 'stat_type'] = 'steals_blocks'
+df.loc[df.over_under=='Over', 'over_under'] = 'over'
+df.loc[df.over_under=='Under', 'over_under'] = 'under'
 
 dm.delete_from_db('Player_Stats', 'Draftkings_Odds', f"game_date='{odds_api.game_date}'", create_backup=False)
 dm.write_to_db(df, 'Player_Stats', 'Draftkings_Odds', 'append')
@@ -416,6 +424,43 @@ df.head(15)
 # %%
 dm.delete_from_db('Player_Stats', 'NumberFire_Projections', f"game_date='{dt.datetime.now().date()}'", create_backup=False)
 dm.write_to_db(df, 'Player_Stats', 'NumberFire_Projections', 'append')
+
+#%%
+
+df = pd.read_html("https://www.sportsline.com/nba/expert-projections/simulation/")[0]
+sl_cols = {'PLAYER': 'player',
+           'POS': 'position',
+           'TEAM': 'team',
+           'GAME': 'game',
+           'FP': 'fantasy_points',
+           'DK': 'draftkings',
+           'FD': 'fanduel',
+           'PROJ': 'projected',
+           'PTS': 'points',
+           'MIN': 'minutes',
+           'FG': 'field_goals',
+           'FGA': 'field_goals_attempted',
+           'AST': 'assists',
+           'TREB': 'rebounds',
+           'DREB': 'defensive_rebounds',
+           'OREB': 'offensive_rebounds',
+           'ST': 'steals',
+           'BK': 'blocks',
+           'TO': 'turnovers',
+           'FT': 'free_throws',
+           'FGP': 'fg_pct',
+           'FTP': 'ft_pct',
+}
+df = df.rename(columns=sl_cols)
+df.columns = ['sl_' + c.lower() if c not in ('player', 'pos', 'team', 'game') else c for c in df.columns ]
+df.player = df.player.apply(dc.name_clean)
+df['game_date'] = dt.datetime.now().date()
+df.head(15)
+
+#%%
+
+dm.delete_from_db('Player_Stats', 'SportsLine_Projections', f"game_date='{dt.datetime.now().date()}'", create_backup=False)
+dm.write_to_db(df, 'Player_Stats', 'SportsLine_Projections', 'append')
 
 
 #%%
@@ -566,8 +611,8 @@ nba_stats = NBAStats()
 import time
 
 yesterday_date = dt.datetime.now().date()-dt.timedelta(1)
-# for i in range(22, 30):
-#     yesterday_date = dt.datetime(2024, 10, i).date()
+# for i in range(11, 13):
+#     yesterday_date = dt.datetime(2024, 11, i).date()
 
 box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score', yesterday_date)
 time.sleep(1)

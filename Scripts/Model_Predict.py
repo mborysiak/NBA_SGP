@@ -14,16 +14,15 @@ import matplotlib.pyplot as plt
 from ff.db_operations import DataManage
 from ff import general as ffgeneral
 import ff.data_clean as dc
-
+import optuna
+from hyperopt import hp, fmin, tpe, Trials
 from sklearn.preprocessing import StandardScaler
 from Fix_Standard_Dev import *
 from joblib import Parallel, delayed
 from skmodel import SciKitModel
 from sklearn.pipeline import Pipeline
 
-from hyperopt.pyll import scope
 from joblib import Parallel, delayed
-from hyperopt import Trials, hp
 import warnings
 warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
 
@@ -169,29 +168,34 @@ def get_full_pipe(skm, m, alpha=None, stack_model=False, min_samples=10, bayes_r
                                         ])
     }
 
+
     pipe = stack_models[stack_model]
     params = skm.default_params(pipe, bayes_rand=bayes_rand, min_samples=min_samples)
     
     if skm.model_obj == 'quantile':
         if m in ('qr_q', 'gbmh_q'): pipe.set_params(**{f'{m}__quantile': alpha})
         elif m in ('rf_q', 'knn_q'): pipe.set_params(**{f'{m}__q': alpha})
+        elif m == 'cb_q': pipe.set_params(**{f'{m}__loss_function': f'Quantile:alpha={alpha}'})
         else: pipe.set_params(**{f'{m}__alpha': alpha})
 
-    if stack_model=='random_full_stack' and run_params['opt_type']=='bayes': 
-        params['random_sample__frac'] = hp.uniform('random_sample__frac', 0.5, 1)
 
-    elif stack_model=='random_full_stack' and run_params['opt_type']=='rand':
+    if stack_model=='random_full_stack' and bayes_rand=='rand':
         params['random_sample__frac'] = np.arange(0.5, 1, 0.05)
 
-        # params['select_perc__percentile'] = hp.uniform('percentile', 0.5, 1)
-        # params['feature_union__agglomeration__n_clusters'] = scope.int(hp.quniform('n_clusters', 2, 10, 1))
-        # params['feature_union__pca__n_components'] = scope.int(hp.quniform('n_components', 2, 10, 1))
+    elif 'random_full_stack' in stack_model and bayes_rand=='optuna':
+        params['random_sample__frac'] = ['real', 0.2, 1]
+        params['feature_union__agglomeration__n_clusters'] = ['int', 3, 15]
+        params['feature_union__pca__n_components'] = ['int', 3, 15]
+        params[f'feature_union__{kb}_fu__k'] = ['int', 3, 50]
+        params[f'{kb}__k'] = ['int', 5, 50]
 
-    if m in ('gbm', 'gbm_c', 'gbm_q'):
-        params[f'{m}__n_estimators'] = scope.int(hp.quniform('n_estimators', 20, 80, 2))
-        params[f'{m}__max_depth'] = scope.int(hp.quniform('max_depth', 2, 18, 2))
-        params[f'{m}__max_features'] = hp.uniform('max_features', 0.6, 0.95)
-        params[f'{m}__subsample'] = hp.uniform('subsample', 0.6, 0.95)
+    elif 'random_kbest' in stack_model and bayes_rand=='optuna':
+        params['random_sample__frac'] = ['real', 0.2, 1]
+        params[f'{kb}__k'] = ['int', 5, 50]
+    
+    else:
+        pass
+        
 
     return pipe, params
 
@@ -235,54 +239,36 @@ def show_scatter_plot(y_pred, y, label='Total', r2=True):
     if r2: print(f'{label} R2:', r2_score(y, y_pred))
     else: print(f'{label} Corr:', np.corrcoef(y, y_pred)[0][1])
 
+# Function to rename keys
+def rename_dict_keys(key, metric):
+    import re
+    pattern = rf'{metric}_[^_]+_([^_]+)_(.+)$'
+    match = re.search(pattern, key)
+    if match:
+        new_key = f'{match.group(1)}_{match.group(2)}'
+        # Remove leading 'q_' or 'c_' if present
+        new_key = re.sub(r'^(q_|c_)', '', new_key)
+        return new_key
+    return key
 
 
-def load_all_stack_pred(model_output_path):
+def load_all_stack_pred(model_output_path, metric):
 
     # load the regregression predictions
     models, full_hold = load_all_pickles(model_output_path, 'all')
-    X_stack, X_stack_class, y_stack, y_stack_class = X_y_stack(full_hold)
+    models = {rename_dict_keys(k, metric): v for k, v in models.items()}
+    full_hold = {rename_dict_keys(k, metric): v for k, v in full_hold.items()}
 
+    if model_output_path.split('/')[-2] == 'points_rebounds_assists_20241111_mse1_brier1':
+        for k, v in full_hold.items():
+            full_hold[k] = v[~((v.player=='Damian Lillard') & (v.year==20241104))].reset_index(drop=True)
+        
+    X_stack, X_stack_class, y_stack, y_stack_class = X_y_stack(full_hold)
     models_reg = {k: v for k, v in models.items() if 'reg' in k}
     models_class = {k: v for k, v in models.items() if 'class' in k}
     models_quant = {k: v for k, v in models.items() if 'quant' in k}
 
     return X_stack, X_stack_class, y_stack, y_stack_class, models_reg, models_class, models_quant
-
-
-# def fit_and_predict(m, df_predict, X, y, proba):
-
-#     try:
-#         cols = m.steps[0][-1].columns
-#         cols = [c for c in cols if c in X.columns]
-#         X = X[cols]
-#         X_predict = df_predict[cols]
-#         m = Pipeline(m.steps[1:])
-#     except:
-#         X_predict = df_predict[X.columns]
-        
-#     try:
-#         m.fit(X,y)
-
-#         if proba: cur_predict = m.predict_proba(X_predict)[:,1]
-#         else: cur_predict = m.predict(X_predict)
-    
-#     except:
-#         cur_predict = []
-
-#     return cur_predict
-
-# def create_stack_predict(df_predict, models, X, y, proba=False):
-
-#     # create the full stack pipe with meta estimators followed by stacked model
-#     X_predict = pd.DataFrame()
-#     for k, ind_models in models.items():
-   
-#         predictions = Parallel(n_jobs=-1, verbose=0)(delayed(fit_and_predict)(m, df_predict, X, y, proba) for m in ind_models)
-#         predictions = pd.Series(pd.DataFrame(predictions).T.mean(axis=1), name=k)
-#         X_predict = pd.concat([X_predict, predictions], axis=1)
-
-#     return X_predict
 
 def fit_and_predict(m_label, m, df_predict, X, y, proba):
 
@@ -308,7 +294,6 @@ def fit_and_predict(m_label, m, df_predict, X, y, proba):
     cur_predict['model'] = m_label
 
     return cur_predict
-
 
 
 def create_stack_predict(df_predict, models, X, y, proba=False):
@@ -668,36 +653,6 @@ def load_pickle(path, fname):
         loaded_object = pickle.load(f)
         return loaded_object
 
-def get_trial_times(root_path, fname, run_params):
-
-    recent_save = f"{root_path}/Model_Outputs/{run_params['cur_metric']}_{run_params['last_train_date']}_{run_params['pred_vers']}"
-    all_trials = load_pickle(recent_save, fname)['trials']
-
-    times = []
-    for k,v in all_trials.items():
-        if k!='reg_adp':
-            max_trial = len(v.trials) - 1
-            trial_times = []
-            for i in range(max_trial-50, max_trial):
-                trial_times.append(v.trials[i]['refresh_time'] - v.trials[i]['book_time'])
-            trial_time = np.mean(trial_times).seconds
-            times.append([k, np.round(trial_time / 60, 4)])
-
-    time_per_trial = pd.DataFrame(times, columns=['model', 'time_per_trial']).sort_values(by='time_per_trial', ascending=False)
-    time_per_trial['total_time'] = time_per_trial.time_per_trial * 50
-    return time_per_trial
-
-
-def calc_num_trials(time_per_trial, run_params):
-
-    n_iters = run_params['n_iters']
-    time_per_trial['percentile_90_time'] = time_per_trial.time_per_trial.quantile(0.6)
-    time_per_trial['num_trials'] = n_iters * (time_per_trial.percentile_90_time + 0.001) / (time_per_trial.time_per_trial +  0.001)
-    time_per_trial['num_trials'] = time_per_trial.num_trials.apply(lambda x: np.min([n_iters, np.max([x, n_iters/10])])).astype('int')
-    
-    return {k:v for k,v in zip(time_per_trial.model, time_per_trial.num_trials)}
-
-
 def get_proba_adp_coef(model_obj, final_m, run_params):
     if model_obj == 'class': proba = True
     else: proba = False
@@ -713,28 +668,71 @@ def get_proba_adp_coef(model_obj, final_m, run_params):
     return proba, run_adp, print_coef
 
 
-def get_trials(fname, final_m, bayes_rand):
 
-    recent_save = f"{root_path}/Model_Outputs/{run_params['cur_metric']}_{run_params['last_train_date']}_{run_params['pred_vers']}"
-    if recent_save is not None and bayes_rand=='bayes': 
-        try:
-            trials = load_pickle(recent_save, fname)
-            trials = trials['trials'][final_m]
-            print('Loading previous trials')
-        except:
-            print('No Previous Trials Exist')
-            trials = Trials()
+def rename_existing(old_study_db, new_study_db, study_name):
 
-    elif bayes_rand=='bayes':
-        print('Creating new Trials object')
-        trials = Trials()
+    import datetime as dt
+    new_study_name = study_name + '_' + dt.datetime.now().strftime('%Y%m%d%H%M%S')
+    optuna.copy_study(from_study_name=study_name, from_storage=old_study_db, to_storage=new_study_db, to_study_name=new_study_name)
+    optuna.delete_study(study_name=study_name, storage=new_study_db)
 
-    else:
-        trials = None
 
-    return trials
+def get_new_study(old_db, new_db, old_name, new_name, num_trials):
+    
+    old_storage = optuna.storages.RDBStorage(
+                                url=old_db,
+                                engine_kwargs={"pool_size": 64, 
+                                            "connect_args": {"timeout": 60},
+                                            },
+                                )
+    
+    new_storage = optuna.storages.RDBStorage(
+                                url=new_db,
+                                engine_kwargs={"pool_size": 64, 
+                                            "connect_args": {"timeout": 60},
+                                            },
+                                )
+    
+    if old_name is not None:
+        old_study = optuna.create_study(
+            study_name=old_name,
+            storage=old_storage,
+            load_if_exists=True
+        )
+    
+    # try:
+    next_study = optuna.create_study(
+        study_name=new_name, 
+        storage=new_storage, 
+        load_if_exists=False
+    )
 
-def run_stack_models(fname, final_m, i, model_obj, alpha, X_stack, y_stack, run_params, num_trials, is_million=None, wt_col=None):
+    # except:
+    #     rename_existing(old_storage, new_storage, new_name)
+    #     next_study = optuna.create_study(
+    #         study_name=new_name, 
+    #         storage=new_storage, 
+    #         load_if_exists=False
+    #     )
+    
+    if old_name is not None and len(old_study.trials) > 0:
+        print(f"Loaded {new_name} study with {old_name} {len(old_study.trials)} trials")
+        next_study.add_trials(old_study.trials[-num_trials:])
+
+    return next_study
+    
+
+def get_optuna_study(final_m, fname, run_params):
+    time.sleep(1*np.random.random())
+    old_name = f"{final_m}_{fname}_{run_params['last_train_date']}"
+    new_name = f"{final_m}_{fname}_{run_params['train_date']}"
+    next_study = get_new_study(f"{run_params['last_study_db']}_{fname}_{final_m}.sqlite3", 
+                               f"{run_params['study_db']}_{fname}_{final_m}.sqlite3", 
+                               old_name, new_name, run_params['num_past_trials'])
+    return next_study
+
+
+def run_stack_models(fname, final_m, i, model_obj, alpha, X_stack, y_stack, run_params, wt_col=None):
 
     print(f'\n{final_m}')
 
@@ -743,19 +741,18 @@ def run_stack_models(fname, final_m, i, model_obj, alpha, X_stack, y_stack, run_
     skm, _, _ = get_skm(pd.concat([X_stack, y_stack], axis=1), model_obj, to_drop=[])
 
     pipe, params = get_full_pipe(skm, final_m, stack_model=run_params['stack_model'], alpha=alpha, 
-                                 min_samples=min_samples, bayes_rand=run_params['opt_type'])
-    
-    trials = get_trials(fname, final_m, run_params['opt_type'])
-    try: n_iter = num_trials[final_m]
-    except: n_iter = run_params['n_iters']
+                                    min_samples=min_samples, bayes_rand=run_params['opt_type'])
+    trials = get_optuna_study(final_m, fname, run_params)
+
 
     try:
         best_model, stack_scores, stack_pred, trial = skm.best_stack(pipe, params, X_stack, y_stack, 
-                                                                    n_iter=n_iter, alpha=alpha, wt_col=wt_col,
-                                                                    trials=trials, bayes_rand=run_params['opt_type'],
+                                                                    n_iter=run_params['n_iters'], alpha=alpha, wt_col=wt_col,
+                                                                    bayes_rand=run_params['opt_type'],trials=trials,
                                                                     run_adp=False, print_coef=print_coef,
                                                                     proba=proba, num_k_folds=run_params['num_k_folds'],
-                                                                    random_state=(i*2)+(i*7))
+                                                                    random_state=(i*2)+(i*7), 
+                                                                    optuna_timeout=run_params['optuna_timeout'])
     except:
         print(f"Error with {final_m}. Running backup model")
         
@@ -765,18 +762,19 @@ def run_stack_models(fname, final_m, i, model_obj, alpha, X_stack, y_stack, run_
             'quantile': 'qr_q'
         }
         
-        trial = trials
         backup_model = backup_models[model_obj]
         pipe, params = get_full_pipe(skm, backup_model, stack_model='kbest', alpha=alpha, 
                                     min_samples=min_samples, bayes_rand=run_params['opt_type'])
+        trials = get_optuna_study(f'{backup_model}_backup_{final_m}', fname, run_params)
 
-        best_model, stack_scores, stack_pred, _ = skm.best_stack(pipe, params, X_stack, y_stack, 
-                                                                    n_iter=n_iter, alpha=alpha, wt_col=None,
-                                                                    trials=Trials(), bayes_rand=run_params['opt_type'],
+        best_model, stack_scores, stack_pred, trial = skm.best_stack(pipe, params, X_stack, y_stack, 
+                                                                    n_iter=run_params['n_iters'], alpha=alpha, wt_col=wt_col,
+                                                                    bayes_rand=run_params['opt_type'], trials=trials,
                                                                     run_adp=False, print_coef=print_coef,
                                                                     proba=proba, num_k_folds=run_params['num_k_folds'],
-                                                                    random_state=(i*2)+(i*7))
-    
+                                                                    random_state=(i*2)+(i*7), 
+                                                                    optuna_timeout=run_params['optuna_timeout'])
+        
     return best_model, stack_scores, stack_pred, trial
 
  
@@ -784,9 +782,9 @@ def run_stack_models(fname, final_m, i, model_obj, alpha, X_stack, y_stack, run_
 def get_func_params(model_obj, alpha):
 
     model_list = {
-        'reg': ['rf', 'gbm', 'gbmh', 'huber', 'xgb', 'lgbm', 'knn', 'ridge', 'lasso', 'bridge'],
-        'class': ['rf_c', 'gbm_c', 'gbmh_c', 'xgb_c','lgbm_c', 'knn_c', 'lr_c'],
-        'quantile': ['qr_q', 'gbm_q', 'lgbm_q', 'gbmh_q', 'rf_q']#, 'knn_q']
+        'reg': ['rf', 'gbm', 'gbmh', 'mlp', 'cb', 'huber', 'xgb', 'lgbm', 'knn', 'ridge', 'lasso', 'bridge', 'enet'],
+        'class': ['rf_c', 'gbm_c', 'gbmh_c', 'xgb_c','lgbm_c', 'knn_c', 'lr_c', 'mlp_c', 'cb_c'],
+        'quantile': ['qr_q', 'gbm_q', 'lgbm_q', 'gbmh_q', 'rf_q', 'cb_q']#, 'knn_q']
     }
 
     func_params = [[m, i, model_obj, alpha] for i, m  in enumerate(model_list[model_obj])]
@@ -861,7 +859,7 @@ def remove_low_preds(predictions, stack_val_pred, model_list, scores):
     
     print(mean_checks)
     models_pre = mean_checks.index
-    for cut in np.arange(0.2, 2, 0.2):
+    for cut in np.arange(0.2, 10, 0.2):
         mean_checks_idx = mean_checks[abs(mean_checks.pct_diff) <= cut].index
         if len(mean_checks_idx) >= run_params['min_include']: break
 
@@ -900,16 +898,7 @@ def load_run_models(run_params, X_stack, y_stack, X_predict, model_obj, alpha=No
     fname = f"{model_obj_label}_{run_params['cur_metric']}_{ens_vers}"    
     model_list, func_params = get_func_params(model_obj, alpha)
 
-    try:
-        time_per_trial = get_trial_times(root_path, fname, run_params)
-        print(time_per_trial)
-        num_trials = calc_num_trials(time_per_trial, run_params)
-    except: 
-        num_trials = {m: run_params['n_iters'] for m in model_list}
-
     model_list, func_params = remove_bad_models(model_obj, run_params, alpha, func_params, model_list)
-    print(num_trials)
-    print(path, fname)
 
     if os.path.exists(f"{path}/{fname}.p"):
         best_models, scores, stack_val_pred = load_stack_runs(path, fname)
@@ -918,12 +907,11 @@ def load_run_models(run_params, X_stack, y_stack, X_predict, model_obj, alpha=No
         
         results = Parallel(n_jobs=-1, verbose=50)(
                         delayed(run_stack_models)
-                        (fname, final_m, i, model_obj, alpha, X_stack, y_stack, run_params, num_trials, is_parlay) 
+                        (fname, final_m, i, model_obj, alpha, X_stack, y_stack, run_params) 
                         for final_m, i, model_obj, alpha in func_params
                         )
         best_models, scores, stack_val_pred, trials = unpack_results(model_list, results)
         save_stack_runs(path, fname, best_models, scores, stack_val_pred, trials)
-
 
     X_predict = X_predict[X_stack.columns]
     predictions = stack_predictions(X_predict, best_models, model_list, model_obj=model_obj)
@@ -1036,21 +1024,18 @@ def create_metric_split_columns_stack(df, metric, individual_cats):
 run_params = {
     
     # set year and week to analyze
-    'last_train_date_orig': '2024-01-18',
-    'train_date_orig': '2024-03-08',
-    'test_time_split_orig': dt.date.today().strftime('%Y-%m-%d'),
+    'last_train_date_orig': '2024-10-22',
+    'train_date_orig': '2024-11-11',
+    'test_time_split_orig': '2024-11-13', #dt.date.today().strftime('%Y-%m-%d'),
 
     'metrics':  [
                 'points', 'assists', 'rebounds',
                 'points_assists', 'points_rebounds',
                 'points_rebounds_assists', 'assists_rebounds', 
-                'three_pointers',  'blocks',  'steals', 'steals_blocks', 
+                'three_pointers',  'blocks', 'steals', 'steals_blocks', 
     ],
 
-    # opt params
-    'opt_type': 'bayes',
-    'n_iters': 50,
-    
+    # opt params    
     'n_splits': 5,
     'num_k_folds': 3,
     'show_plot': True,
@@ -1059,14 +1044,19 @@ run_params = {
 
     # set version and iterations
     'pred_vers': 'mse1_brier1',
-    'stack_model': 'random_kbest',
-    'stack_model_class': 'random_kbest',
-    # 'stack_model': 'random_full_stack',
-    # 'stack_model_class': 'random_full_stack',
+    # 'stack_model': 'random_kbest',
+    # 'stack_model_class': 'random_kbest',
+    'stack_model': 'random_full_stack',
+    'stack_model_class': 'random_full_stack',
     # 'stack_model': 'random_full_stack_ind_cats',
     # 'stack_model_class': 'random_full_stack_ind_cats',
     'parlay': False,
 
+    'opt_type': 'optuna',
+    'hp_algo': 'tpe',
+    'num_past_trials': 100,
+    'optuna_timeout': 60*3,
+    'n_iters': 50
 }
 
 s_mod = run_params['stack_model']
@@ -1103,131 +1093,148 @@ run_params['last_train_date'] = int(run_params['last_train_date_orig'].replace('
 teams = dm.read("SELECT player, game_date year, team, opponent FROM FantasyData", 'Player_Stats')
 teams.year = teams.year.apply(lambda x: int(x.replace('-', '')))
 
+
+
 # %%
 
-for te_date, tr_date in [
-                            ['2024-10-22', '2024-03-08'],
-                            # ['2024-02-23', '2024-01-18'],
-                            # ['2024-02-24', '2024-01-18'],
-                            # ['2024-02-25', '2024-01-18'],
-                            # ['2024-02-26', '2024-01-18']
-                            ]:
+# for te_date, tr_date in [
+#                             # ['2024-10-22', '2024-10-22'],
+#                             # ['2024-10-23', '2024-10-22'],
+#                             # ['2024-10-24', '2024-10-22'],
+#                             # ['2024-10-25', '2024-10-22'],
+#                             # ['2024-10-26', '2024-10-22'],
+#                             # ['2024-10-27', '2024-10-22'],
+#                             # ['2024-10-28', '2024-10-22'],
+#                             # ['2024-10-29', '2024-10-22'],
+#                             # ['2024-10-30', '2024-10-22'],
+#                             # ['2024-10-31', '2024-10-22'],
+#                             # ['2024-11-01', '2024-10-22'],
+#                             # ['2024-11-02', '2024-10-22'],
+#                             # ['2024-11-03', '2024-10-22'],
+#                             # ['2024-11-04', '2024-10-22'],
+#                             # ['2024-11-06', '2024-10-22'],
+#                             # ['2024-11-07', '2024-10-22'],
+#                             ['2024-11-08', '2024-10-22'],
+#                             ['2024-11-09', '2024-10-22'],
+#                             ['2024-11-10', '2024-10-22'],
+#                             ]:
 
-    run_params['train_date'] = int(tr_date.replace('-', ''))
-    run_params['test_time_split'] = int(te_date.replace('-', ''))
+#     run_params['train_date'] = int(tr_date.replace('-', ''))
+#     run_params['test_time_split'] = int(te_date.replace('-', ''))
 
-    individual_cats = {}
-    for metric in run_params['metrics']:
+individual_cats = {}
+for metric in run_params['metrics']:
 
-        # load data and filter down
-        pkey, model_output_path = create_pkey_output_path(metric, run_params)
-        df, run_params = load_data(run_params)
-        run_params['cur_metric'] = metric
-        output_teams = df.loc[df.game_date==run_params['test_time_split'], ['player', 'team', 'opponent']]
+    # load data and filter down
+    pkey, model_output_path = create_pkey_output_path(metric, run_params)
+    df, run_params = load_data(run_params)
+    run_params['cur_metric'] = metric
 
-        df = create_y_act(df, metric)
-        df['week'] = 1
-        df['year'] = df.game_date
-        df['team'] = 0
+    run_params['last_study_db'] = f"sqlite:///optuna/{run_params['last_train_date']}/pred_"
+    run_params['study_db'] = f"sqlite:///optuna/{run_params['train_date']}/pred_"
 
-        df_train, df_predict, output_start = train_predict_split(df, run_params)
-        df_train_prob, df_predict_prob = get_over_under_class(df, metric, run_params)
-        output_start_prob = df_predict_prob[['player', 'game_date', 'value']].assign(metric=metric)
+    output_teams = df.loc[df.game_date==run_params['test_time_split'], ['player', 'team', 'opponent']]
 
-        # set up blank dictionaries for all metrics
-        out_reg, out_class, out_quant, out_million = {}, {}, {}, {}
+    df = create_y_act(df, metric)
+    df['week'] = 1
+    df['year'] = df.game_date
+    df['team'] = 0
 
-        #------------
-        # Run the Stacking Models and Generate Output
-        #------------
+    df_train, df_predict, output_start = train_predict_split(df, run_params)
+    df_train_prob, df_predict_prob = get_over_under_class(df, metric, run_params)
+    output_start_prob = df_predict_prob[['player', 'game_date', 'value']].assign(metric=metric)
 
-        # get the training data for stacking and prediction data after stacking
-        X_stack, X_stack_class, y_stack, y_stack_class, models_reg, models_class, models_quant = load_all_stack_pred(model_output_path)
+    # set up blank dictionaries for all metrics
+    out_reg, out_class, out_quant, out_million = {}, {}, {}, {}
 
-        X_predict, X_predict_class = get_stack_predict_data(df_train, df_predict, df_train_prob, df_predict_prob, run_params, 
-                                                            models_reg, models_quant, models_class)
+    #------------
+    # Run the Stacking Models and Generate Output
+    #------------
 
+    # get the training data for stacking and prediction data after stacking
+    X_stack, X_stack_class, y_stack, y_stack_class, models_reg, models_class, models_quant = load_all_stack_pred(model_output_path, metric)
 
+    X_predict, X_predict_class = get_stack_predict_data(df_train, df_predict, df_train_prob, df_predict_prob, run_params, 
+                                                        models_reg, models_quant, models_class)
 
-        if 'ind_cats' in run_params['stack_model'] and metric in ['points', 'rebounds', 'assists', 'steals', 'blocks']:
-            individual_cats[metric] = {} 
-            individual_cats = save_individual_stats(individual_cats, metric, X_stack, X_stack_class, X_predict, X_predict_class)
+    if 'ind_cats' in run_params['stack_model'] and metric in ['points', 'rebounds', 'assists', 'steals', 'blocks']:
+        individual_cats[metric] = {} 
+        individual_cats = save_individual_stats(individual_cats, metric, X_stack, X_stack_class, X_predict, X_predict_class)
 
-        combined_metrics = ['points_assists', 'points_rebounds', 'points_rebounds_assists', 'assists_rebounds', 'steals_blocks']
-        if 'ind_cats' in run_params['stack_model'] and metric in combined_metrics:
-            for k,v in individual_cats.items():
-                if k in metric:
-                    X_stack = pd.merge(X_stack, individual_cats[k]['X_stack'], on=['player', 'year']).reset_index(drop=True)
-                    X_stack_class = pd.merge(X_stack_class, individual_cats[k]['X_stack_class'][['player', 'year']], on=['player', 'year']).reset_index(drop=True)
-                    X_predict = pd.merge(X_predict, individual_cats[k]['X_predict'], on=['player', 'week', 'year']).reset_index(drop=True)
-                    X_predict_class = pd.merge(X_predict_class, individual_cats[k]['X_predict_class'], on=['player', 'week', 'year']).reset_index(drop=True)
+    combined_metrics = ['points_assists', 'points_rebounds', 'points_rebounds_assists', 'assists_rebounds', 'steals_blocks']
+    if 'ind_cats' in run_params['stack_model'] and metric in combined_metrics:
+        for k,v in individual_cats.items():
+            if k in metric:
+                X_stack = pd.merge(X_stack, individual_cats[k]['X_stack'], on=['player', 'year']).reset_index(drop=True)
+                X_stack_class = pd.merge(X_stack_class, individual_cats[k]['X_stack_class'][['player', 'year']], on=['player', 'year']).reset_index(drop=True)
+                X_predict = pd.merge(X_predict, individual_cats[k]['X_predict'], on=['player', 'week', 'year']).reset_index(drop=True)
+                X_predict_class = pd.merge(X_predict_class, individual_cats[k]['X_predict_class'], on=['player', 'week', 'year']).reset_index(drop=True)
 
-            X_predict_player_join = X_predict[['player', 'year']].rename(columns={'year':'game_date'})
-            X_predict_class_player_join = X_predict_class[['player', 'year']].rename(columns={'year':'game_date'})
-            output_start = pd.merge(output_start, X_predict_player_join, on=['player', 'game_date']).reset_index(drop=True)
-            output_start_prob = pd.merge(output_start_prob, X_predict_class_player_join, on=['player', 'game_date']).reset_index(drop=True)
+        X_predict_player_join = X_predict[['player', 'year']].rename(columns={'year':'game_date'})
+        X_predict_class_player_join = X_predict_class[['player', 'year']].rename(columns={'year':'game_date'})
+        output_start = pd.merge(output_start, X_predict_player_join, on=['player', 'game_date']).reset_index(drop=True)
+        output_start_prob = pd.merge(output_start_prob, X_predict_class_player_join, on=['player', 'game_date']).reset_index(drop=True)
 
-            X_stack = create_metric_split_columns_stack(X_stack, metric, individual_cats)
-            X_stack_class = create_metric_split_columns_stack(X_stack_class, metric, individual_cats)
-            X_predict = create_metric_split_columns_stack(X_predict, metric, individual_cats)
-            X_predict_class = create_metric_split_columns_stack(X_predict_class, metric, individual_cats)
+        X_stack = create_metric_split_columns_stack(X_stack, metric, individual_cats)
+        X_stack_class = create_metric_split_columns_stack(X_stack_class, metric, individual_cats)
+        X_predict = create_metric_split_columns_stack(X_predict, metric, individual_cats)
+        X_predict_class = create_metric_split_columns_stack(X_predict_class, metric, individual_cats)
 
-        X_stack_player = X_stack.copy()
-        X_predict_class_player = X_predict_class.copy()
-        X_stack = X_stack.drop(['player', 'year'], axis=1)
-        X_predict = X_predict.drop(['player', 'week', 'year'], axis=1)
-        y_stack = y_stack.drop(['player', 'year'], axis=1).y_act
+    X_stack_player = X_stack.copy()
+    X_predict_class_player = X_predict_class.copy()
+    X_stack = X_stack.drop(['player', 'year'], axis=1)
+    X_predict = X_predict.drop(['player', 'week', 'year'], axis=1)
+    y_stack = y_stack.drop(['player', 'year'], axis=1).y_act
 
-        odds = pull_odds(metric, run_params['parlay'])
-        X_stack_class = pd.merge(X_stack_class, odds, on=['player', 'year'])
-        X_predict_class = pd.merge(X_predict_class, odds, on=['player', 'year'])
+    odds = pull_odds(metric, run_params['parlay'])
+    X_stack_class = pd.merge(X_stack_class, odds, on=['player', 'year'])
+    X_predict_class = pd.merge(X_predict_class, odds, on=['player', 'year'])
 
-        X_stack_class = create_value_columns(X_stack_class, metric)
-        X_predict_class = create_value_columns(X_predict_class, metric)
+    X_stack_class = create_value_columns(X_stack_class, metric)
+    X_predict_class = create_value_columns(X_predict_class, metric)
 
-        y_stack_class = pd.merge(y_stack_class, X_stack_class[['player', 'year']], on=['player', 'year'])
-        y_stack_class = y_stack_class.drop(['player', 'year'], axis=1).y_act
+    y_stack_class = pd.merge(y_stack_class, X_stack_class[['player', 'year']], on=['player', 'year'])
+    y_stack_class = y_stack_class.drop(['player', 'year'], axis=1).y_act
 
-        X_stack_class = X_stack_class.drop(['player', 'year'], axis=1)
-        X_predict_class = X_predict_class.drop(['player', 'week', 'year'], axis=1)
+    X_stack_class = X_stack_class.drop(['player', 'year'], axis=1)
+    X_predict_class = X_predict_class.drop(['player', 'week', 'year'], axis=1)
 
-        X_stack_class = create_value_compare_col(X_stack_class)
-        X_predict_class = create_value_compare_col(X_predict_class)
+    X_stack_class = create_value_compare_col(X_stack_class)
+    X_predict_class = create_value_compare_col(X_predict_class)
 
-        if X_predict_class.shape[0] > 0:
+    if X_predict_class.shape[0] > 0:
 
-            best_val_prob, best_pred_prob = load_run_models(run_params, X_stack_class, y_stack_class, X_predict_class, 'class', alpha=None)         
-            best_val_mean, best_pred_mean = load_run_models(run_params, X_stack, y_stack, X_predict, 'reg', alpha=None)
-            best_val_q25, best_pred_q25 = load_run_models(run_params, X_stack, y_stack, X_predict, 'quantile', alpha=0.25)
-            best_val_q50, best_pred_q50 = load_run_models(run_params, X_stack, y_stack, X_predict, 'quantile', alpha=0.5)
-            best_val_q75, best_pred_q75 = load_run_models(run_params, X_stack, y_stack, X_predict, 'quantile', alpha=0.75)
+        best_val_prob, best_pred_prob = load_run_models(run_params, X_stack_class, y_stack_class, X_predict_class, 'class', alpha=None)         
+        best_val_mean, best_pred_mean = load_run_models(run_params, X_stack, y_stack, X_predict, 'reg', alpha=None)
+        best_val_q25, best_pred_q25 = load_run_models(run_params, X_stack, y_stack, X_predict, 'quantile', alpha=0.25)
+        best_val_q50, best_pred_q50 = load_run_models(run_params, X_stack, y_stack, X_predict, 'quantile', alpha=0.5)
+        best_val_q75, best_pred_q75 = load_run_models(run_params, X_stack, y_stack, X_predict, 'quantile', alpha=0.75)
 
-            preds = [best_pred_mean, best_pred_q25, best_pred_q50, best_pred_q75]
-            labels = ['pred_mean', 'pred_q25', 'pred_q50', 'pred_q75']
-            output = create_output(output_start, preds, labels)
-            output_prob = create_output_class(output_start_prob, best_pred_prob, output_teams)
-            output_prob = pd.merge(output_prob, output, on=['player', 'game_date'])
-            output_prob = add_dk_lines(output_prob)
+        preds = [best_pred_mean, best_pred_q25, best_pred_q50, best_pred_q75]
+        labels = ['pred_mean', 'pred_q25', 'pred_q50', 'pred_q75']
+        output = create_output(output_start, preds, labels)
+        output_prob = create_output_class(output_start_prob, best_pred_prob, output_teams)
+        output_prob = pd.merge(output_prob, output, on=['player', 'game_date'])
+        output_prob = add_dk_lines(output_prob)
 
-            output_prob = pd.merge(output_prob, df_predict[['player', 'game_date', 'y_act']], on=['player', 'game_date'], how='left')
-            output_prob['y_act_prob'] = np.where(output_prob.y_act >= output_prob.value, 1, 0)
-            output_prob = output_prob[['player', 'game_date', 'team', 'opponent', 'metric', 'decimal_odds', 'value', 
-                                        'prob_over', 'y_act_prob', 'y_act', 'pred_mean', 'pred_q25', 'pred_q50', 'pred_q75']]
-            output_prob = output_prob.assign(pred_vers=run_params['pred_vers'], ens_vers=run_params['class_ens_vers'], 
-                                            train_date=run_params['train_date'], parlay=run_params['parlay'])
-            output_prob = np.round(output_prob,3).sort_values(by='prob_over', ascending=False)
-            display(output_prob)
+        output_prob = pd.merge(output_prob, df_predict[['player', 'game_date', 'y_act']], on=['player', 'game_date'], how='left')
+        output_prob['y_act_prob'] = np.where(output_prob.y_act >= output_prob.value, 1, 0)
+        output_prob = output_prob[['player', 'game_date', 'team', 'opponent', 'metric', 'decimal_odds', 'value', 
+                                    'prob_over', 'y_act_prob', 'y_act', 'pred_mean', 'pred_q25', 'pred_q50', 'pred_q75']]
+        output_prob = output_prob.assign(pred_vers=run_params['pred_vers'], ens_vers=run_params['class_ens_vers'], 
+                                        train_date=run_params['train_date'], parlay=run_params['parlay'])
+        output_prob = np.round(output_prob,3).sort_values(by='prob_over', ascending=False)
+        display(output_prob)
 
-            del_str = f'''metric='{metric}'
-                        AND game_date={run_params['test_time_split']} 
-                        AND pred_vers='{run_params['pred_vers']}'
-                        AND ens_vers='{run_params['class_ens_vers']}'
-                        AND train_date={run_params['train_date']}
-                        AND parlay={run_params['parlay']}
-                        '''
-            dm.delete_from_db('Simulation', 'Over_Probability_New', del_str, create_backup=False)
-            dm.write_to_db(output_prob,'Simulation', 'Over_Probability_New', 'append')
-
+        del_str = f'''metric='{metric}'
+                    AND game_date={run_params['test_time_split']} 
+                    AND pred_vers='{run_params['pred_vers']}'
+                    AND ens_vers='{run_params['class_ens_vers']}'
+                    AND train_date={run_params['train_date']}
+                    AND parlay={run_params['parlay']}
+                    '''
+        dm.delete_from_db('Simulation', 'Over_Probability_New', del_str, create_backup=False)
+        dm.write_to_db(output_prob,'Simulation', 'Over_Probability_New', 'append')
 
 #%%
 
@@ -1249,7 +1256,7 @@ if run_params['stack_model'] == 'random_kbest':
     past_pred = past_pred.drop(['y_act_fill', 'y_act_prob_fill'], axis=1)
     past_pred = past_pred.sort_values(by='game_date').reset_index(drop=True)
 
-    dm.write_to_db(past_pred,'Simulation', 'Over_Probability_New', 'replace', create_backup=True)
+    dm.write_to_db(past_pred, 'Simulation', 'Over_Probability_New', 'replace', create_backup=True)
 
 #%%
 
@@ -1663,14 +1670,14 @@ for cut_name, cut_dict in query_cuts.items():
     final_m = 'lr_c'
     skm, _, _ = get_skm(pd.concat([X_train, y_train], axis=1), model_obj, to_drop=[])
     pipe, params = get_full_pipe(skm, final_m, stack_model='random_kbest', alpha=None, 
-                            min_samples=10, bayes_rand=run_params['opt_type'])
+                            min_samples=10, bayes_rand='bayes')
     params['random_sample__frac'] = hp.uniform('frac', 0.5, 1)
     
     if rank_order in ['stack_model', 'avg']:
         try:
             best_model, _, stack_pred, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
                                                         n_iter=10, alpha=None, wt_col=wt_col,
-                                                        trials=trials_obj, bayes_rand=run_params['opt_type'],
+                                                        trials=trials_obj, bayes_rand='bayes',
                                                         run_adp=False, print_coef=False,
                                                         proba=True, num_k_folds=run_params['num_k_folds'],
                                                         random_state=(i*2)+(i*7))
@@ -1678,7 +1685,7 @@ for cut_name, cut_dict in query_cuts.items():
         except:
             best_model, _, stack_pred, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
                                                         n_iter=10, alpha=None, wt_col=wt_col,
-                                                        trials=Trials(), bayes_rand=run_params['opt_type'],
+                                                        trials=Trials(), bayes_rand='bayes',
                                                         run_adp=False, print_coef=False,
                                                         proba=True, num_k_folds=run_params['num_k_folds'],
                                                         random_state=(i*2)+(i*7))

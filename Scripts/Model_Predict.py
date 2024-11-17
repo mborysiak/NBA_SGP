@@ -1026,7 +1026,7 @@ run_params = {
     # set year and week to analyze
     'last_train_date_orig': '2024-10-22',
     'train_date_orig': '2024-11-11',
-    'test_time_split_orig': '2024-11-13', #dt.date.today().strftime('%Y-%m-%d'),
+    'test_time_split_orig': dt.date.today().strftime('%Y-%m-%d'),
 
     'metrics':  [
                 'points', 'assists', 'rebounds',
@@ -1046,10 +1046,10 @@ run_params = {
     'pred_vers': 'mse1_brier1',
     # 'stack_model': 'random_kbest',
     # 'stack_model_class': 'random_kbest',
-    'stack_model': 'random_full_stack',
-    'stack_model_class': 'random_full_stack',
-    # 'stack_model': 'random_full_stack_ind_cats',
-    # 'stack_model_class': 'random_full_stack_ind_cats',
+    # 'stack_model': 'random_full_stack',
+    # 'stack_model_class': 'random_full_stack',
+    'stack_model': 'random_full_stack_ind_cats',
+    'stack_model_class': 'random_full_stack_ind_cats',
     'parlay': False,
 
     'opt_type': 'optuna',

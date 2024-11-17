@@ -633,20 +633,20 @@ def calc_stack_model(dbname, tablename, last_run_date, ens_vers, past_runs, wt_c
                                     min_samples=10, bayes_rand=run_params['opt_type'])
             params['random_sample__frac'] = hp.uniform('frac', 0.5, 1)
             
-            try:
-                best_model, _, _, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
-                                                            n_iter=num_trials, alpha=None, wt_col=wt_col,
-                                                            trials=trial_obj, bayes_rand=run_params['opt_type'],
-                                                            run_adp=False, print_coef=False,
-                                                            proba=True, num_k_folds=run_params['num_k_folds'],
-                                                            random_state=(i*2)+(i*7))
-            except:
-                best_model, _, _, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
-                                                            n_iter=num_trials, alpha=None, wt_col=wt_col,
-                                                            trials=Trials(), bayes_rand=run_params['opt_type'],
-                                                            run_adp=False, print_coef=False,
-                                                            proba=True, num_k_folds=run_params['num_k_folds'],
-                                                            random_state=(i*2)+(i*7))
+            # try:
+            #     best_model, _, _, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
+            #                                                 n_iter=num_trials, alpha=None, wt_col=wt_col,
+            #                                                 trials=trial_obj, bayes_rand=run_params['opt_type'],
+            #                                                 run_adp=False, print_coef=False,
+            #                                                 proba=True, num_k_folds=run_params['num_k_folds'],
+            #                                                 random_state=(i*2)+(i*7))
+            # except:
+            best_model, _, _, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
+                                                        n_iter=num_trials, alpha=None, wt_col=wt_col,
+                                                        trials=Trials(), bayes_rand=run_params['opt_type'],
+                                                        run_adp=False, print_coef=False,
+                                                        proba=True, num_k_folds=run_params['num_k_folds'],
+                                                        random_state=(i*2)+(i*7))
 
             for c in X_train.columns:
                 if c not in X_test.columns:
@@ -663,10 +663,11 @@ def calc_stack_model(dbname, tablename, last_run_date, ens_vers, past_runs, wt_c
             preds_stack = preds_stack.assign(value_cut_greater=val_greater, value_cut_less=val_less, wt_col=wt_col, 
                                             decimal_cut_greater=decimal_cut_greater, decimal_cut_less=decimal_cut_less, ens_vers=ens_vers)
             
-            dm.write_to_db(preds_stack, dbname, tablename, 'append', create_backup=False)
-            if not os.path.exists(save_path): os.makedirs(save_path)
+        #     dm.write_to_db(preds_stack, dbname, tablename, 'append', create_backup=False)
+        #     if not os.path.exists(save_path): os.makedirs(save_path)
         
-        save_pickle(trial_obj, save_path, ens_vers)
+        # save_pickle(trial_obj, save_path, ens_vers)
+            print(preds_stack.head())
 
 #-------------
 # Set Tables
@@ -703,7 +704,7 @@ for ens_vers in [
     #------------
 
     for wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less in iter_cats[:1]:
-        calc_stack_model(db_stack_predict, save_tablename, last_run_tablename, ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less)
+        calc_stack_model(db_stack_predict, save_tablename, last_run_date, ens_vers, past_runs, wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less)
 
     # out = Parallel(n_jobs=-1, verbose=50)(
     #     delayed(calc_stack_model)

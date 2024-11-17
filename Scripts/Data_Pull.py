@@ -212,14 +212,15 @@ class OddsAPIPull:
 
         return props
     
-hist_period = 0
+# for i in range(270, 280):
+hist_period = 0 #i*24 + 2
 pull_historical = False
-
-base_url = 'https://api.the-odds-api.com/v4/'
-odds_api = OddsAPIPull(api_key, base_url, sport, region, odds_format, date_format, historical=pull_historical)
 
 start_time = dt.datetime.now() - dt.timedelta(hours=hist_period)
 end_time = (dt.datetime.now() + dt.timedelta(hours=12 - hist_period))
+
+base_url = 'https://api.the-odds-api.com/v4/'
+odds_api = OddsAPIPull(api_key, base_url, sport, region, odds_format, date_format, historical=pull_historical)
 
 events_df = odds_api.pull_events(start_time=start_time, end_time=end_time)
 events_df

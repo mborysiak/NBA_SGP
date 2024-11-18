@@ -1044,12 +1044,12 @@ run_params = {
 
     # set version and iterations
     'pred_vers': 'mse1_brier1',
-    # 'stack_model': 'random_kbest',
-    # 'stack_model_class': 'random_kbest',
+    'stack_model': 'random_kbest',
+    'stack_model_class': 'random_kbest',
     # 'stack_model': 'random_full_stack',
     # 'stack_model_class': 'random_full_stack',
-    'stack_model': 'random_full_stack_ind_cats',
-    'stack_model_class': 'random_full_stack_ind_cats',
+    # 'stack_model': 'random_full_stack_ind_cats',
+    # 'stack_model_class': 'random_full_stack_ind_cats',
     'parlay': False,
 
     'opt_type': 'optuna',
@@ -1728,5 +1728,5 @@ for cut_name, cut_dict in query_cuts.items():
     elif rank_order=='original': display(preds_orig.sort_values(by='prob_over', ascending=False).head(50))
     elif rank_order=='avg': display(preds_avg.sort_values(by='avg_prob', ascending=False).head(50))
 
-#%%
+    #%%
 

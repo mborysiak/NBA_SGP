@@ -267,12 +267,12 @@ df = dm.read(f'''SELECT description player,
                         game_date
                 FROM Game_Odds 
                 WHERE bookmaker='draftkings'
-                      AND game_date='{odds_api.game_date}'
+                    AND game_date='{odds_api.game_date}'
                 GROUP BY description, 
-                         prop_type, 
-                         over_under,
-                         game_date
-             ''', 'Player_Stats')
+                        prop_type, 
+                        over_under,
+                        game_date
+            ''', 'Player_Stats')
 df.player = df.player.apply(dc.name_clean)
 df.stat_type = df.stat_type.apply(lambda x: x.replace('player_', ''))
 df.loc[df.stat_type=='threes', 'stat_type'] = 'three_pointers'
@@ -286,6 +286,7 @@ dm.write_to_db(df, 'Player_Stats', 'Draftkings_Odds', 'append')
 
 
 #%%
+
 df = dm.read(f'''SELECT * 
                 FROM Game_Odds
                 JOIN (
@@ -346,7 +347,7 @@ dm.write_to_db(df, 'Team_Stats', 'Draftkings_Odds', 'append')
 fname = 'fantasy-basketball-projections.csv'
 
 today_date = dt.datetime.now().date()
-# today_date = dt.date(2024, 10, 28)
+# today_date = dt.date(2024, 11, 20)
 date_str = today_date.strftime('%Y%m%d')
 dl_files = os.listdir('/Users/borys/Downloads')
 dl_files = [f for f in dl_files if 'fantasy-basketball-projections' in f]
@@ -419,11 +420,12 @@ df = df.rename(columns={'Player': 'player',
                         'TO': 'turnovers',
                         '3PM': 'three_pointers'})
 
-df['game_date'] = dt.datetime.now().date()
+game_date = dt.datetime.now().date()
+df['game_date'] = game_date
 df.head(15)
 
 # %%
-dm.delete_from_db('Player_Stats', 'NumberFire_Projections', f"game_date='{dt.datetime.now().date()}'", create_backup=False)
+dm.delete_from_db('Player_Stats', 'NumberFire_Projections', f"game_date='{game_date}'", create_backup=False)
 dm.write_to_db(df, 'Player_Stats', 'NumberFire_Projections', 'append')
 
 #%%
@@ -611,8 +613,8 @@ nba_stats = NBAStats()
 #%%
 import time
 
-yesterday_date = dt.datetime.now().date()-dt.timedelta(1)
-# for i in range(11, 13):
+yesterday_date = dt.datetime.now().date()-dt.timedelta(2)
+# for i in range(17, 25):
 #     yesterday_date = dt.datetime(2024, 11, i).date()
 
 box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score', yesterday_date)
@@ -703,12 +705,15 @@ dm.write_to_db(df, 'Team_Stats', 'NBA_Schedule', 'replace')
 # %%
 
 
-# import sqlite3
+import sqlite3
 
-# for t in ['FantasyData', 'NumberFire_Projections', 'FantasyPros', 'Draftkings_Odds']:
-#     conn = sqlite3.connect('c:/Users/borys/Downloads/Player_Stats.sqlite3')
-#     df = pd.read_sql_query(f"SELECT * FROM {t} WHERE game_date >= '2024-02-20' ", conn)
-#     dm.write_to_db(df, 'Player_Stats', t, 'append')
+for t in ['FantasyData', 'NumberFire_Projections', 'FantasyPros', 'SportsLine_Projections']:
+    conn = sqlite3.connect('c:/Users/borys/Downloads/Player_Stats_Update.sqlite3')
+    df = pd.read_sql_query(f"SELECT * FROM {t}  ", conn)
+    game_dates = list(df.game_date.unique())
+    game_dates.append('0')
+    dm.delete_from_db('Player_Stats', t, f"game_date IN {tuple(game_dates)}", create_backup=False)
+    dm.write_to_db(df, 'Player_Stats', t, 'append')
 
 # conn = sqlite3.connect('c:/Users/borys/Downloads/Team_Stats.sqlite3')
 # df = pd.read_sql_query(f"SELECT * FROM Draftkings_Odds WHERE game_date >= '2024-02-20' ", conn)

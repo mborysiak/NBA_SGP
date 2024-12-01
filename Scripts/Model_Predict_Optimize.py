@@ -369,8 +369,8 @@ def flip_probs(df, pred_col='final_pred'):
 def get_past_runs(ens_vers, tablename, foldername, dbname='Simulation'):
 
     past_runs = dm.read(f'''SELECT DISTINCT wt_col, decimal_cut_greater, decimal_cut_less, value_cut_greater, value_cut_less
-                           FROM {tablename}
-                           WHERE ens_vers='{ens_vers}'
+                            FROM {tablename}
+                            WHERE ens_vers='{ens_vers}'
                         ''', dbname)
     
     for c in past_runs.columns:
@@ -633,20 +633,20 @@ def calc_stack_model(dbname, tablename, last_run_date, ens_vers, past_runs, wt_c
                                     min_samples=10, bayes_rand=run_params['opt_type'])
             params['random_sample__frac'] = hp.uniform('frac', 0.5, 1)
             
-            # try:
-            #     best_model, _, _, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
-            #                                                 n_iter=num_trials, alpha=None, wt_col=wt_col,
-            #                                                 trials=trial_obj, bayes_rand=run_params['opt_type'],
-            #                                                 run_adp=False, print_coef=False,
-            #                                                 proba=True, num_k_folds=run_params['num_k_folds'],
-            #                                                 random_state=(i*2)+(i*7))
-            # except:
-            best_model, _, _, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
-                                                        n_iter=num_trials, alpha=None, wt_col=wt_col,
-                                                        trials=Trials(), bayes_rand=run_params['opt_type'],
-                                                        run_adp=False, print_coef=False,
-                                                        proba=True, num_k_folds=run_params['num_k_folds'],
-                                                        random_state=(i*2)+(i*7))
+            try:
+                best_model, _, _, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
+                                                            n_iter=num_trials, alpha=None, wt_col=wt_col,
+                                                            trials=trial_obj, bayes_rand=run_params['opt_type'],
+                                                            run_adp=False, print_coef=False,
+                                                            proba=True, num_k_folds=run_params['num_k_folds'],
+                                                            random_state=(i*2)+(i*7))
+            except:
+                best_model, _, _, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
+                                                            n_iter=num_trials, alpha=None, wt_col=wt_col,
+                                                            trials=Trials(), bayes_rand=run_params['opt_type'],
+                                                            run_adp=False, print_coef=False,
+                                                            proba=True, num_k_folds=run_params['num_k_folds'],
+                                                            random_state=(i*2)+(i*7))
 
             for c in X_train.columns:
                 if c not in X_test.columns:

@@ -43,14 +43,15 @@ run_params = {
     
     # set year and week to analyze
     'cv_time_input_back_days': 30,
-    'last_train_time_split': '2024-10-22',
-    'train_time_split': '2024-11-11',
+    'last_train_time_split': '2024-11-11',
+    'train_time_split': '2024-11-28',
     
     'metrics': [
-                 'points', 'assists', 'rebounds',
-                 'three_pointers', 'points_assists',
-                 'points_rebounds','points_rebounds_assists', 
-                 'assists_rebounds', 'steals_blocks','blocks', 'steals', 
+                #  'points', 'assists', 'rebounds',
+                #  'three_pointers', 'points_assists',
+                #  'points_rebounds','points_rebounds_assists', 
+                 #'assists_rebounds', 
+                 'steals_blocks','blocks', 'steals', 
                  # 'total_points', 'spread'  
                 ],
     'n_iters': 15,
@@ -204,9 +205,13 @@ def pull_odds(metric, run_params):
     return odds
 
 def create_value_columns(df, metric):
+    try: df.value = df.value.astype(float)
+    except: pass
 
     for c in df.columns:
         if metric in c:
+            try: df[c] = df[c].astype(float)
+            except: pass
             df = pd.concat([df, pd.Series(df[c]-df.value, name=f'{c}_vs_value')], axis=1)
             df = pd.concat([df, pd.Series(df[c]/df.value, name=f'{c}_over_value')], axis=1)
 
@@ -241,11 +246,11 @@ def output_dict():
     return {'pred': {}, 'actual': {}, 'scores': {}, 'models': {}, 'full_hold':{}, 'param_scores': {}, 'trials': {}}
 
 
-def rename_existing(old_study_db, new_study_db, study_name):
+def rename_existing(new_study_db, study_name):
 
     import datetime as dt
     new_study_name = study_name + '_' + dt.datetime.now().strftime('%Y%m%d%H%M%S')
-    optuna.copy_study(from_study_name=study_name, from_storage=old_study_db, to_storage=new_study_db, to_study_name=new_study_name)
+    optuna.copy_study(from_study_name=study_name, to_study_name=new_study_name, from_storage=new_study_db, to_storage=new_study_db)
     optuna.delete_study(study_name=study_name, storage=new_study_db)
 
 
@@ -280,7 +285,7 @@ def get_new_study(old_db, new_db, old_name, new_name, num_trials):
         )
 
     except:
-        rename_existing(old_storage, new_storage, new_name)
+        rename_existing(new_storage, new_name)
         next_study = optuna.create_study(
             study_name=new_name, 
             storage=new_storage, 

@@ -140,3 +140,4 @@ Data/Simulation.sqlite3
 Data/Stack_Predict_2024.sqlite3
 Data/Results.sqlite3
 Scripts/config.yaml
+/Scripts/catboost_info

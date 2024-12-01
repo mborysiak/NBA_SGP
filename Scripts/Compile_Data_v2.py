@@ -97,6 +97,26 @@ def fantasy_data():
     return fd
 
 
+def sportsline_data(df):
+
+    sl = dm.read(f'''SELECT player, game_date,
+                            sl_points, sl_trb, sl_assists, sl_blocks,
+                            sl_steals, sl_turnovers, sl_fg_pct, sl_ft_pct,
+                            sl_minutes, sl_fantasy_points, sl_free_throws
+                     FROM Sportsline_Projections 
+                    ''', 'Player_Stats')
+    
+    for c in ['sl_points', 'sl_trb', 'sl_assists', 'sl_blocks',
+              'sl_steals', 'sl_turnovers', 'sl_fg_pct', 'sl_ft_pct',
+              'sl_minutes', 'sl_fantasy_points', 'sl_free_throws']:
+        try: sl[c] = sl[c].apply(lambda x: float(x.replace('-', '0')))
+        except: pass
+
+    df = pd.merge(df, sl, on=['player', 'game_date'], how='left')
+
+    return df
+
+
 def fantasy_pros(df):
 
     fp = dm.read(f'''SELECT * 
@@ -133,17 +153,18 @@ def consensus_fill(df):
     to_fill = {
 
         # stat fills
-        'proj_points': ['fp_points', 'nf_points', 'fd_points'],
-        'proj_rebounds': ['fp_rebounds', 'nf_rebounds', 'fd_rebounds'],
-        'proj_assists': ['fp_assists', 'nf_assists', 'fd_assists'],
-        'proj_blocks': ['fp_blocks', 'nf_blocks', 'fd_blocks'],
-        'proj_steals': ['fp_steals', 'nf_steals', 'fd_steals'],
-        'proj_turnovers': ['fp_turnovers', 'nf_turnovers', 'fd_turnovers'],
+        'proj_points': ['fp_points', 'nf_points', 'fd_points', 'sl_points'],
+        'proj_rebounds': ['fp_rebounds', 'nf_rebounds', 'fd_rebounds', 'sl_trb'],
+        'proj_assists': ['fp_assists', 'nf_assists', 'fd_assists', 'sl_assists'],
+        'proj_blocks': ['fp_blocks', 'nf_blocks', 'fd_blocks', 'sl_blocks'],
+        'proj_steals': ['fp_steals', 'nf_steals', 'fd_steals', 'sl_steals'],
+        'proj_turnovers': ['fp_turnovers', 'nf_turnovers', 'fd_turnovers', 'sl_turnovers'],
         'proj_three_pointers': ['fp_three_pointers', 'nf_three_pointers', 'fd_three_pointers'],
-        'proj_fg_pct': ['fp_fg_pct', 'fd_fg_pct'],
-        'proj_ft_pct': ['fp_ft_pct', 'fd_ft_pct'],
-        'proj_minutes': ['fp_minutes', 'nf_minutes', 'fd_minutes'],
-        'proj_fantasy_points': ['fd_fantasy_points', 'nf_fantasy_points']
+        'proj_fg_pct': ['fp_fg_pct', 'fd_fg_pct', 'sl_fg_pct'],
+        'proj_ft_pct': ['fp_ft_pct', 'fd_ft_pct', 'sl_ft_pct'],
+        'proj_minutes': ['fp_minutes', 'nf_minutes', 'fd_minutes', 'sl_minutes'],
+        'proj_fantasy_points': ['fd_fantasy_points', 'nf_fantasy_points', 'sl_fantasy_points'],
+        'proj_ft_made': ['fd_ft_made', 'sl_free_throws'],
         }
 
     for k, tf in to_fill.items():
@@ -195,9 +216,8 @@ def add_proj_market_share(df):
 
 
 
-def rolling_proj_stats(df):
+def rolling_proj_stats(df, proj_cols):
     df = forward_fill(df)
-    proj_cols = [c for c in df.columns if 'fd' in c or 'fp' in c or 'nf' in c or 'proj' in c]
     df = add_rolling_stats(df, ['player'], proj_cols)
 
     for c in proj_cols:
@@ -206,6 +226,9 @@ def rolling_proj_stats(df):
 
         df[f'trend_diff_{c}6v10'] = df[f'rmean3_{c}'] - df[f'rmean10_{c}']
         df[f'trend_chg_{c}6v10'] = df[f'trend_diff_{c}6v10'] / (df[f'rmean10_{c}']+5)
+
+        df[f'trend_diff_{c}1v6'] = df[c] - df[f'rmean6_{c}']
+        df[f'trend_chg_{c}1v6'] = df[f'trend_diff_{c}1v6'] / (df[f'rmean6_{c}']+5)
 
     return df
 
@@ -561,8 +584,6 @@ def get_columns(df, train_date, threshold=0.05):
 
     return df
 
-#%%
-
 def trunc_normal(mean_val, sdev, min_sc, max_sc, num_samples=500):
 
     import scipy.stats as stats
@@ -692,7 +713,6 @@ class PlayerPropsCalculator:
         
         return result_df
     
-#%%
 
 def pull_vegas_stats(prop):
     
@@ -770,105 +790,50 @@ def get_all_vegas_stats():
     return player_vegas_stats
 
 
-def fill_vegas_stats(df, player_vegas_stats, pos):
+def fill_vegas_stats(df, player_vegas_stats):
 
-    if pos=='Defense': 
-        player_vegas_stats = player_vegas_stats.rename(columns={'player': 'defTeam'})
-        df = pd.merge(df, player_vegas_stats, on=['defTeam', 'week', 'year'], how='left')
-    else:
-        df = pd.merge(df, player_vegas_stats, on=['player', 'week', 'year'], how='left')
+    df = pd.merge(df, player_vegas_stats, on=['player', 'game_date'], how='left')
+    
+    df['avg_proj_points_rebounds_assists'] = df[['avg_proj_points', 'avg_proj_rebounds', 'avg_proj_assists']].sum(axis=1)
+    df['avg_proj_points_rebounds'] = df[['avg_proj_points', 'avg_proj_rebounds']].sum(axis=1)
+    df['avg_proj_points_assists'] = df[['avg_proj_points', 'avg_proj_assists']].sum(axis=1)
+    df['avg_proj_steals_blocks'] = df[['avg_proj_steals', 'avg_proj_blocks']].sum(axis=1)
 
-    if pos == 'QB':
-        fill_cols = {
-            'player_anytime_td_ev_poisson': ['avg_proj_rush_td'],
-            'player_anytime_td_ev_trunc_norm': ['avg_proj_rush_td'],
-            'player_tds_over_ev_poisson': ['avg_proj_rush_td'],
-            'player_tds_over_ev_trunc_norm': ['avg_proj_rush_td'],
-            
-            'player_pass_tds_ev_poisson': ['avg_proj_pass_td'],
-            'player_pass_tds_ev_trunc_norm': ['avg_proj_pass_td'],
-            'player_pass_yds_ev_poisson': ['avg_proj_pass_yds'],
-            'player_pass_yds_ev_trunc_norm': ['avg_proj_pass_yds'],
-            'player_pass_attempts_ev_poisson': ['avg_proj_pass_att'],
-            'player_pass_attempts_ev_trunc_norm': ['avg_proj_pass_att'],
-            'player_pass_completions_ev_poisson': ['avg_proj_pass_comp'],
-            'player_pass_completions_ev_trunc_norm': ['avg_proj_pass_comp'],
-            'player_pass_interceptions_ev_poisson': ['avg_proj_pass_int'],
-            'player_pass_interceptions_ev_trunc_norm': ['avg_proj_pass_int'],
-            
-            'player_rush_yds_ev_poisson': ['avg_proj_rush_yds'],
-            'player_rush_yds_ev_trunc_norm': ['avg_proj_rush_yds'],
-            'player_rush_attempts_ev_poisson': ['avg_proj_rush_att'],
-            'player_rush_attempts_ev_trunc_norm': ['avg_proj_rush_att'],
-        }
-
-    elif pos == 'Defense':
-        fill_cols = {
-            'player_anytime_td_ev_poisson': ['avg_proj_dst_td'],
-            'player_anytime_td_ev_trunc_norm': ['avg_proj_dst_td'],
-            'player_tds_over_ev_poisson': ['avg_proj_dst_td'],
-            'player_tds_over_ev_trunc_norm': ['avg_proj_dst_td'],
-        }
-
-    else:
-        fill_cols = {
-            'player_anytime_td_ev_poisson': ['avg_proj_rush_td', 'avg_proj_rec_td'],
-            'player_anytime_td_ev_trunc_norm': ['avg_proj_rush_td', 'avg_proj_rec_td'],
-            'player_tds_over_ev_poisson': ['avg_proj_rush_td', 'avg_proj_rec_td'],
-            'player_tds_over_ev_trunc_norm': ['avg_proj_rush_td', 'avg_proj_rec_td'],
-            
-            'player_rush_yds_ev_poisson': ['avg_proj_rush_yds'],
-            'player_rush_yds_ev_trunc_norm': ['avg_proj_rush_yds'],
-            'player_rush_attempts_ev_poisson': ['avg_proj_rush_att'],
-            'player_rush_attempts_ev_trunc_norm': ['avg_proj_rush_att'],
-            
-            'player_reception_yds_ev_poisson': ['avg_proj_rec_yds'],
-            'player_reception_yds_ev_trunc_norm': ['avg_proj_rec_yds'],
-            'player_receptions_ev_poisson': ['avg_proj_rec'],
-            'player_receptions_ev_trunc_norm': ['avg_proj_rec'],
-        }
+    fill_cols = {
+       'player_points_ev_poisson': ['avg_proj_points'],
+       'player_points_ev_trunc_norm': ['avg_proj_points'], 
+       'player_assists_ev_poisson': ['avg_proj_assists'],
+       'player_assists_ev_trunc_norm': ['avg_proj_assists'], 
+       'player_rebounds_ev_poisson': ['avg_proj_rebounds'],
+       'player_rebounds_ev_trunc_norm': ['avg_proj_rebounds'], 
+       'player_steals_ev_poisson': ['avg_proj_steals'],
+       'player_steals_ev_trunc_norm': ['avg_proj_steals'], 
+       'player_blocks_ev_poisson': ['avg_proj_blocks'],
+       'player_blocks_ev_trunc_norm': ['avg_proj_blocks'], 
+       'player_points_rebounds_ev_poisson': ['avg_proj_points_rebounds'],
+       'player_points_rebounds_ev_trunc_norm': ['avg_proj_points_rebounds'],
+       'player_points_assists_ev_poisson': ['avg_proj_points_assists'],
+       'player_points_assists_ev_trunc_norm': ['avg_proj_points_assists'],
+       'player_points_rebounds_assists_ev_poisson': ['avg_proj_points_rebounds_assists'],
+       'player_points_rebounds_assists_ev_trunc_norm': ['avg_proj_points_rebounds_assists'],
+       'player_threes_ev_poisson': ['avg_proj_three_pointers'], 
+       'player_threes_ev_trunc_norm': ['avg_proj_three_pointers'],
+       'player_blocks_steals_ev_poisson': ['avg_proj_steals_blocks'],
+       'player_blocks_steals_ev_trunc_norm': ['avg_proj_steals_blocks']
+    }
 
     cols = [c for c in player_vegas_stats.columns if 'ev' in c]
     for c in cols:
         ratio = (df.loc[~df[c].isnull(), c] / (df.loc[~df[c].isnull(), fill_cols[c]].sum(axis=1)+0.1)).median()
         df.loc[df[c].isnull(), c] = ratio * df.loc[df[c].isnull(), fill_cols[c]].sum(axis=1)
-
-    if pos == 'QB':
-        df['vegas_proj_points'] = (
-            df[['player_anytime_td_ev_trunc_norm', 'player_tds_over_ev_trunc_norm',
-                #'player_anytime_td_ev_poisson', 'player_tds_over_ev_poisson'
-                ]].mean(axis=1) * 6 +
-            df[['player_pass_tds_ev_trunc_norm', #'player_pass_tds_ev_poisson',
-                ]].mean(axis=1) * 4 +
-            df[['player_pass_yds_ev_poisson', 'player_pass_yds_ev_trunc_norm']].mean(axis=1) * 0.04 +
-            df[['player_rush_yds_ev_poisson', 'player_rush_yds_ev_trunc_norm']].mean(axis=1) * 0.1 -
-            df[['player_pass_interceptions_ev_poisson', 'player_pass_interceptions_ev_trunc_norm']].mean(axis=1) * 1
-        )
-    if pos in ('RB', 'WR', 'TE'):
-        df['vegas_proj_points'] = (
-            df[['player_anytime_td_ev_trunc_norm','player_tds_over_ev_trunc_norm',
-                #'player_tds_over_ev_poisson', #'player_anytime_td_ev_poisson'
-                ]].mean(axis=1) * 6 + 
-            df[['player_rush_yds_ev_poisson', 'player_rush_yds_ev_trunc_norm']].mean(axis=1) * 0.1 + 
-            df[['player_reception_yds_ev_poisson', 'player_reception_yds_ev_trunc_norm']].mean(axis=1) * 0.1 + 
-            df[['player_receptions_ev_poisson', 'player_receptions_ev_trunc_norm']].mean(axis=1) * 1
-        )
-
-    if pos != 'Defense':
-        df['avg_vegas_proj_points'] = 0.8*df.avg_proj_points + 0.2*df.vegas_proj_points
-        df['good_avg_proj_points'] = df[['etr_proj_points', 'fpts_proj_points', 'vegas_proj_points', 
-                                        'fdta_proj_points', 'projected_points', 'nf_proj_points']].mean(axis=1)
+        df['avg_'+c] = df[[c, fill_cols[c][0]]].mean(axis=1)
     
     return df
 
-#%%
-
-# xx = get_all_vegas_stats()
-# xx.sort_values(by='player_points_ev_trunc_norm')
 
 #%%
 
-train_date = '2024-11-11'
+train_date = '2024-11-28'
 max_date = dm.read("SELECT max(game_date) FROM FantasyData", 'Player_Stats').values[0][0]
 
 df = fantasy_data()
@@ -879,6 +844,7 @@ df = df[df.game_date.isin(game_dates[:100+days_since_training])].reset_index(dro
 
 df = fantasy_pros(df)
 df = numberfire(df)
+df = sportsline_data(df)
 df = fix_fp_returns(df)
 
 missing = df.loc[(df.fd_points==0) | ((df.fp_points==0) & (df.nf_points==0)), 
@@ -888,9 +854,14 @@ df = consensus_fill(df)
 df = forward_fill(df)
 df = df.dropna().reset_index(drop=True)
 
+vegas_stats = get_all_vegas_stats()
+df = fill_vegas_stats(df, vegas_stats)
+
 df = df[(df.fd_points>0) & (df.fp_points>0) & (df.nf_points>0)].reset_index(drop=True)
 df = add_proj_market_share(df)
-df = rolling_proj_stats(df)
+
+proj_cols = [c for c in df.columns if 'fd' in c or 'fp' in c or 'nf' in c or 'proj' in c or '_ev_' in c]
+df = rolling_proj_stats(df, proj_cols)
 print(df.shape)
 
 # get box score stats androll the box score stats and shift back a game
@@ -941,6 +912,277 @@ print(df.shape)
 dm.write_to_db(df.iloc[:,:2000], 'Model_Features', f'Model_Data_{train_date}', if_exist='replace')
 if df.shape[1] > 2000:
     dm.write_to_db(df.iloc[:,2000:], 'Model_Features', f'Model_Data_{train_date}v2', if_exist='replace')
+
+#%%
+
+def create_metric_split_columns(df, metric_split):
+    if len(metric_split)==2:
+        ms1 = metric_split[0]
+        ms2 = metric_split[1]
+
+        for c in df.columns:
+            if ms1 in c:
+                try: df[f'{c}_{ms2}'] = df[c] + df[c.replace(ms1, ms2)]
+                except: pass
+
+    elif len(metric_split)==3:
+        ms1 = metric_split[0]
+        ms2 = metric_split[1]
+        ms3 = metric_split[2]
+
+        for c in df.columns:
+            if ms1 in c:
+                try: df[f'{c}_{ms2}_{ms3}'] = df[c] + df[c.replace(ms1, ms2)] + df[c.replace(ms1, ms3)]
+                except: pass
+
+    return df
+
+def parlay_values(df):
+    df['value'] = np.select([
+                                df.value <= 3, 
+                                (df.value > 3) & (df.value < 10),
+                                (df.value >= 10) & (df.value < 24),
+                                (df.value >= 24) & (df.value < 30),
+                                (df.value >= 30) & (df.value < 35),
+                                (df.value >= 35) & (df.value < 40),
+                                (df.value >= 40) & (df.value < 45),
+                                (df.value >= 45)
+                            ], 
+                            
+                            [
+                                df.value,
+                                df.value - 1,
+                                df.value - 2,
+                                df.value - 3,
+                                30,
+                                35,
+                                40,
+                                df.value - 5
+                            ]
+                            )
+    
+    return df
+
+def create_y_act(df, metric):
+
+    if metric in ('points_assists', 'points_rebounds', 'points_rebounds_assists', 'steals_blocks', 'assists_rebounds'):
+        metric_split = metric.split('_')
+        df[f'y_act_{metric}'] = df[['y_act_' + c for c in metric_split]].sum(axis=1)
+        df = create_metric_split_columns(df, metric_split)
+
+    df = df.drop([c for c in df.columns if 'y_act' in c and metric not in c], axis=1)
+    df = df.rename(columns={f'y_act_{metric}': 'y_act'})
+    return df
+
+def pull_odds(metric, run_params):
+
+    odds = dm.read(f'''SELECT player, game_date year, value
+                       FROM Draftkings_Odds 
+                       WHERE stat_type='{metric}'
+                             AND over_under='over'
+                             AND decimal_odds < 2.25
+                             AND decimal_odds > 1.75
+                    ''', 'Player_Stats')
+    odds.year = odds.year.apply(lambda x: int(x.replace('-', '')))
+    if run_params['parlay']: odds = parlay_values(odds)
+
+    return odds
+
+def create_value_columns(df, metric):
+
+    for c in df.columns:
+        if metric in c:
+            df = pd.concat([df, pd.Series(df[c]-df.value, name=f'{c}_vs_value')], axis=1)
+            df = pd.concat([df, pd.Series(df[c]/df.value, name=f'{c}_over_value')], axis=1)
+
+    return df
+
+def remove_low_counts(df):
+    cnts = df.groupby('game_date').agg({'player': 'count'})
+    cnts = cnts[cnts.player > 5].reset_index().drop('player', axis=1)
+    df = pd.merge(df, cnts, on='game_date')
+    return df
+
+def train_predict_split(df, run_params):
+
+    # # get the train / predict dataframes and output dataframe
+    df_train = df[df.game_date < run_params['train_time_split']].reset_index(drop=True)
+    df_train = df_train.dropna(subset=['y_act']).reset_index(drop=True)
+
+    df_predict = df[df.game_date == run_params['train_time_split']].reset_index(drop=True)
+    output_start = df_predict[['player', 'game_date']].copy().drop_duplicates()
+
+    # get the minimum number of training samples for the initial datasets
+    min_samples = 100#int(df_train[df_train.game_date < run_params['cv_time_input']].shape[0])  
+    print('Shape of Train Set', df_train.shape)
+
+    return df_train, df_predict, output_start, min_samples
+
+def get_over_under_class(df, metric, run_params, model_obj='class'):
+    
+    odds = pull_odds(metric, run_params)
+    df = pd.merge(df, odds, on=['player', 'year'])
+    df = df.sort_values(by='game_date').reset_index(drop=True)
+
+    if model_obj == 'class': df['y_act'] = np.where(df.y_act >= df.value, 1, 0)
+    elif model_obj == 'reg': df['y_act'] = df.y_act - df.value
+
+    df = create_value_columns(df, metric)
+    df = remove_low_counts(df)
+    df_train_class, df_predict_class, _, _ = train_predict_split(df, run_params)
+
+    return df_train_class, df_predict_class
+
+def show_calibration_curve(y_true, y_pred, n_bins=10, strategy='quantile'):
+
+    from sklearn.calibration import calibration_curve
+
+    # Plot perfectly calibrated
+    plt.plot([0, 1], [0, 1], linestyle = '--', label = 'Ideally Calibrated')
+    
+    # Plot model's calibration curve
+    x, y = calibration_curve(y_true, y_pred, n_bins=n_bins, strategy='quantile')
+    plt.plot(y, x, marker = '.', label = 'Quantile')
+
+    # Plot model's calibration curve
+    x, y = calibration_curve(y_true, y_pred, n_bins=n_bins, strategy='uniform')
+    plt.plot(y, x, marker = '+', label = 'Uniform')
+    
+    leg = plt.legend(loc = 'upper left')
+    plt.xlabel('Average Predicted Probability in each bin')
+    plt.ylabel('Ratio of positives')
+    plt.show()
+
+from skmodel import SciKitModel
+from hyperopt import Trials
+from sklearn.metrics import r2_score
+import datetime as dt
+
+train_date = '20241128'
+metric = 'assists'
+model_obj = 'class'
+alpha = 0.8
+if model_obj =='class': proba = True
+else: proba = False
+
+print(metric)
+
+Xy1 = dm.read(f'SELECT * FROM Model_Data_{train_date}', f'Model_Features')
+Xy2 = dm.read(f'SELECT * FROM Model_Data_{train_date}v2', f'Model_Features')
+Xy = pd.concat([Xy1, Xy2], axis=1)
+Xy = Xy.sort_values(by=['game_date']).reset_index(drop=True)
+
+Xy.game_date = Xy.game_date.apply(lambda x: int(x.replace('-', '')))
+Xy['year'] = Xy.game_date
+Xy['week'] = 1
+
+run_params = {
+    'parlay': False,
+    'train_time_split': Xy.game_date.max(),
+    'cv_time_input': int((dt.datetime.strptime(train_date, '%Y%m%d') - dt.timedelta(days=30)).strftime('%Y%m%d'))
+}
+
+Xy = create_y_act(Xy, metric)
+train, pred = get_over_under_class(Xy, metric, run_params, model_obj='class')
+
+
+
+preds = []
+actuals = []
+
+skm = SciKitModel(train, model_obj=model_obj, alpha=alpha, hp_algo='atpe')
+to_drop = list(train.dtypes[train.dtypes=='object'].index)
+X, y = skm.Xy_split('y_act', to_drop = to_drop)
+
+if proba:
+    p = 'select_perc_c'
+    kb = 'k_best_c'
+    m = 'lgbm_c'
+else:
+    p = 'select_perc'
+    kb = 'k_best'
+    m = 'lgbm'
+
+pipe = skm.model_pipe([skm.piece('random_sample'),
+                        skm.piece('std_scale'), 
+                        # skm.piece(p),
+                        # skm.feature_union([
+                        #                skm.piece('agglomeration'), 
+                        #                 skm.piece(f'{kb}_fu'),
+                        #                 skm.piece('pca')
+                        #                 ]),
+                        skm.piece(kb),
+                        skm.piece(m)
+                    ])
+
+params = skm.default_params(pipe, 'bayes')
+
+# pipe.steps[-1][-1].set_params(**{'loss_function': f'Quantile:alpha={alpha}'})
+best_models, oof_data, param_scores, _ = skm.time_series_cv(pipe, X, y, params, n_iter=10,
+                                                            col_split='game_date',n_splits=4,
+                                                            time_split=run_params['cv_time_input'], 
+                                                            alpha=alpha,
+                                                            bayes_rand='bayes', proba=proba,
+                                                            sample_weight=False, trials=Trials(),
+                                                            random_seed=64893)
+
+print('R2 score:', r2_score(oof_data['full_hold']['y_act'], oof_data['full_hold']['pred']))
+oof_data['full_hold'].plot.scatter(x='pred', y='y_act')
+try: show_calibration_curve(oof_data['full_hold'].y_act, oof_data['full_hold'].pred, n_bins=6)
+except: pass
+
+display(oof_data['full_hold'].sort_values(by='pred', ascending=False).iloc[:50])
+display(oof_data['full_hold'].sort_values(by='pred', ascending=True).iloc[:50])
+
+
+# %%
+
+for i in range(4):
+
+    import matplotlib.pyplot as plt
+
+    pipeline = best_models[i]
+    pipeline.fit(X,y)
+    # Extract the coefficients
+    log_reg = pipeline.named_steps[m]
+
+    try:
+        log_reg.coef_.shape[1]
+        coefficients = log_reg.coef_[0]
+    except: 
+        try:
+            coefficients = log_reg.coef_
+        except:
+            coefficients = log_reg.feature_importances_
+
+    # Get the feature names from SelectKBest
+    rand_features = pipeline.steps[0][1].columns
+    X_out = X[rand_features]
+    selected_features = pipeline.named_steps[kb].get_support(indices=True)
+
+    coef = pd.Series(coefficients, index=X_out.columns[selected_features])
+    coef = coef[np.abs(coef) > 0.01].sort_values()
+    coef.plot(kind = 'barh', figsize=(8, len(coef)/3))
+    plt.show()
+
+# %%
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # %%
 

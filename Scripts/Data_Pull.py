@@ -227,7 +227,8 @@ events_df
 
 #%%
 
-dm.delete_from_db('Team_Stats', 'Game_Events', f"game_date='{odds_api.game_date}'", create_backup=False)
+event_ids = tuple(events_df.event_id.values)
+dm.delete_from_db('Team_Stats', 'Game_Events', f"game_date='{odds_api.game_date}' AND event_id IN {event_ids}", create_backup=False)
 dm.write_to_db(events_df, 'Team_Stats', 'Game_Events', 'append')
 
 #%%
@@ -251,10 +252,10 @@ team_props
 
 #%%
 
-dm.delete_from_db('Team_Stats', 'Game_Odds', f"game_date='{odds_api.game_date}'", create_backup=False)
+dm.delete_from_db('Team_Stats', 'Game_Odds', f"game_date='{odds_api.game_date}' AND event_id IN {event_ids} ", create_backup=False)
 dm.write_to_db(team_props, 'Team_Stats', 'Game_Odds', 'append')
 
-dm.delete_from_db('Player_Stats', 'Game_Odds', f"game_date='{odds_api.game_date}'", create_backup=False)
+dm.delete_from_db('Player_Stats', 'Game_Odds', f"game_date='{odds_api.game_date}' AND event_id IN {event_ids}", create_backup=False)
 dm.write_to_db(player_props, 'Player_Stats', 'Game_Odds', 'append')
 
 #%%
@@ -613,7 +614,7 @@ nba_stats = NBAStats()
 #%%
 import time
 
-yesterday_date = dt.datetime.now().date()-dt.timedelta(2)
+yesterday_date = dt.datetime.now().date()-dt.timedelta(1)
 # for i in range(17, 25):
 #     yesterday_date = dt.datetime(2024, 11, i).date()
 

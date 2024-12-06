@@ -1044,12 +1044,12 @@ run_params = {
 
     # set version and iterations
     'pred_vers': 'mse1_brier1',
-    'stack_model': 'random_kbest',
-    'stack_model_class': 'random_kbest',
+    # 'stack_model': 'random_kbest',
+    # 'stack_model_class': 'random_kbest',
     # 'stack_model': 'random_full_stack',
     # 'stack_model_class': 'random_full_stack',
-    # 'stack_model': 'random_full_stack_ind_cats',
-    # 'stack_model_class': 'random_full_stack_ind_cats',
+    'stack_model': 'random_full_stack_ind_cats',
+    'stack_model_class': 'random_full_stack_ind_cats',
     'parlay': False,
 
     'opt_type': 'optuna',
@@ -1228,8 +1228,12 @@ for metric in run_params['metrics']:
 
 if run_params['stack_model'] == 'random_kbest':
 
-    past_pred = dm.read('''SELECT * 
-                            FROM Over_Probability_New 
+    cut_time = (dt.datetime.strptime(run_params['train_date_orig'], '%Y-%m-%d') - dt.timedelta(50))
+    cut_time = cut_time.strftime('%Y-%m-%d').replace('-', '')
+    
+    past_pred = dm.read(f'''SELECT * 
+                           FROM Over_Probability_New 
+                           WHERE game_date >= {cut_time}
                             ''', 'Simulation')
     attach_pts = get_all_past_results(run_params)
 
@@ -1244,7 +1248,8 @@ if run_params['stack_model'] == 'random_kbest':
     past_pred = past_pred.drop(['y_act_fill', 'y_act_prob_fill'], axis=1)
     past_pred = past_pred.sort_values(by='game_date').reset_index(drop=True)
 
-    dm.write_to_db(past_pred, 'Simulation', 'Over_Probability_New', 'replace', create_backup=True)
+    dm.delete_from_db('Simulation', 'Over_Probability_New', f"game_date >= {cut_time}", create_backup=True)
+    dm.write_to_db(past_pred, 'Simulation', 'Over_Probability_New', 'append', create_backup=False)
 
 #%%
 
@@ -1716,5 +1721,5 @@ for cut_name, cut_dict in query_cuts.items():
     elif rank_order=='original': display(preds_orig.sort_values(by='prob_over', ascending=False).head(50))
     elif rank_order=='avg': display(preds_avg.sort_values(by='avg_prob', ascending=False).head(50))
 
-    #%%
+#%%
 

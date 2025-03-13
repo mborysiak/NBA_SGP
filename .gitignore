@@ -141,3 +141,10 @@ Data/Stack_Predict_2024.sqlite3
 Data/Results.sqlite3
 Scripts/config.yaml
 /Scripts/catboost_info
+Data/Archive/Stack_Predict_2024_Old.sqlite3
+Data/Archive/Stack_Predict_2025_Old.sqlite3
+Data/Stack_Predict_2025.sqlite3
+Data/Player_Stats.sqlite3
+Data/Stack_Predict_2025.sqlite3
+Data/Experiments.sqlite3
+Data/Simulation.sqlite3

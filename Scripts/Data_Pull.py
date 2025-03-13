@@ -227,7 +227,7 @@ events_df
 
 #%%
 
-event_ids = tuple(events_df.event_id.values)
+event_ids = tuple(list(events_df.event_id.values) + [0])
 dm.delete_from_db('Team_Stats', 'Game_Events', f"game_date='{odds_api.game_date}' AND event_id IN {event_ids}", create_backup=False)
 dm.write_to_db(events_df, 'Team_Stats', 'Game_Events', 'append')
 
@@ -241,6 +241,7 @@ stats = [
 
 markets = ','.join(stats)
 player_props = odds_api.all_market_odds(markets, events_df)
+print('\n==========\nNumber draftkings props:', len(player_props[player_props.bookmaker=='draftkings']))
 player_props
 
 #%%
@@ -342,7 +343,32 @@ dm.write_to_db(df, 'Team_Stats', 'Draftkings_Odds', 'append')
 #%%
 
 
+#%%
 
+import os
+today_month = dt.datetime.now().month
+today_day = str(dt.datetime.now().day).zfill(2)
+today_year = dt.datetime.now().year
+
+game_date = dt.datetime.now().date()
+fname = f'FantasyPros_NBA_Daily_Fantasy_Basketball_Projections_({today_month}_{today_day})_.csv'
+
+try: os.replace(f"/Users/borys/Downloads/{fname}", 
+                f'{root_path}/Data/OtherData/Fantasy_Pros/{fname}')
+except: pass
+
+df = pd.read_csv(f'{root_path}/Data/OtherData/Fantasy_Pros/{fname}').dropna(axis=0)
+df.columns = ['player', 'team', 'position', 'opponent', 'points', 'rebounds', 
+              'assists', 'blocks', 'steals', 'fg_pct', 'ft_pct', 'three_pointers', 'games_played', 'minutes', 'turnovers']
+
+df['game_date'] = game_date
+
+df.player = df.player.apply(dc.name_clean)
+df.team = df.team.apply(lambda x: x.lstrip().rstrip())
+df = df[df.team!='FA']
+
+dm.delete_from_db('Player_Stats', 'FantasyPros', f"game_date='{game_date}'", create_backup=False)
+dm.write_to_db(df, 'Player_Stats', 'FantasyPros', if_exist='append')
 
 #%%
 fname = 'fantasy-basketball-projections.csv'
@@ -387,47 +413,112 @@ df.team = df.team.apply(lambda x: x.lstrip().rstrip())
 df[['fg_pct', 'ft_pct']] = df[['fg_pct', 'ft_pct']] / 100
 df = df.drop(['id', 'gs'], axis=1)
 
+# fantasy data is forgetting to update teams after trades, so this corrects the duplicates
+fp_teams = dm.read(f"SELECT player, team FROM FantasyPros WHERE game_date='{today_date}'", 'Player_Stats')
+team_update = {
+               'GSW': 'GS',
+               'NOR': 'NO',
+               'NYK': 'NY',
+               'SAS': 'SA',
+               'UTH': 'UTA'
+               }
+for ot, nt in team_update.items(): 
+    fp_teams.loc[fp_teams.team==ot, 'team'] = nt
+
+df2 = pd.merge(df, fp_teams, on=['player', 'team'])
+print('In FantasyData, but not FantasyPros:', [d for d in df.player.values if d not in df2.player.values])
+print('In FantasyPros, but not FantasyData:', [d for d in df2.player.values if d not in df.player.values])
+
 dm.delete_from_db('Player_Stats', 'FantasyData', f"game_date='{today_date}'", create_backup=False)
-dm.write_to_db(df, 'Player_Stats', 'FantasyData', if_exist='append')
+dm.write_to_db(df2, 'Player_Stats', 'FantasyData', if_exist='append')
 
 #%%
 
-def name_extract(col):
-    characters = ['III', 'II', '.', 'Jr', 'Sr']
-    for c in characters:
-        col = col.replace(c, '')
-    col = col.split(' ')
-    col = [c for c in col if c!='']
-    return ' '.join(col[2:4])
+# def name_extract(col):
+#     characters = ['III', 'II', '.', 'Jr', 'Sr']
+#     for c in characters:
+#         col = col.replace(c, '')
+#     col = col.split(' ')
+#     col = [c for c in col if c!='']
+#     return ' '.join(col[2:4])
 
-import requests
-from io import StringIO
+# import requests
+# from io import StringIO
 
-df = pd.read_html(StringIO(requests.get('https://www.numberfire.com/nba/daily-fantasy/daily-basketball-projections', verify=False).text))[3]
-df.columns = [c[1] for c in df.columns]
-df.Player = df.Player.apply(name_extract)
-df.Player = df.Player.apply(dc.name_clean)
+# df = pd.read_html(StringIO(requests.get('https://www.numberfire.com/nba/daily-fantasy/daily-basketball-projections', verify=False).text))[3]
+# df.columns = [c[1] for c in df.columns]
+# df.Player = df.Player.apply(name_extract)
+# df.Player = df.Player.apply(dc.name_clean)
 
-df = df.rename(columns={'Player': 'player',
-                        'FP': 'fantasy_points',
-                        'Salary': 'salary',
-                        'Value': 'value',
-                        'Min': 'minutes',
-                        'Pts': 'points',
-                        'Reb': 'rebounds',
-                        'Ast': 'assists',
-                        'Stl': 'steals',
-                        'Blk': 'blocks',
-                        'TO': 'turnovers',
-                        '3PM': 'three_pointers'})
+# df = df.rename(columns={'Player': 'player',
+#                         'FP': 'fantasy_points',
+#                         'Salary': 'salary',
+#                         'Value': 'value',
+#                         'Min': 'minutes',
+#                         'Pts': 'points',
+#                         'Reb': 'rebounds',
+#                         'Ast': 'assists',
+#                         'Stl': 'steals',
+#                         'Blk': 'blocks',
+#                         'TO': 'turnovers',
+#                         '3PM': 'three_pointers'})
+
+# game_date = dt.datetime.now().date()
+# df['game_date'] = game_date
+# df.head(15)
+
+# if df.player[0] != 'No Data':
+#     dm.delete_from_db('Player_Stats', 'NumberFire_Projections', f"game_date='{game_date}'", create_backup=False)
+#     dm.write_to_db(df, 'Player_Stats', 'NumberFire_Projections', 'append')
+
+#%%
+
+today_date = dt.datetime.now().date()
+date_str = today_date.strftime('%Y%m%d')
+
+fname = 'DAILY.csv'
+try: os.replace(f"/Users/borys/Downloads/{fname}", 
+                f"{root_path}/Data/OtherData/FanDuelResearch/{date_str}_{fname}")
+except: pass
+
+df = pd.read_csv(f"{root_path}/Data/OtherData/FanDuelResearch/{date_str}_{fname}")
+df.player = df.player.apply(dc.name_clean)
+
+df = df.drop(['team', 'gameInfo', 'fieldGoalShootingPercentage', 'threePointsShootingPercentage', 
+              'freeThrowShootingPercentage', 'positionRank', 'overallRank', 'gamesPlayed'], axis=1)
+
+df = df.rename(columns={'player': 'player',
+                        'team': 'team',
+                        'salary': 'salary',
+                        'value': 'value',
+                        'min': 'minutes',
+                        'fieldGoalsMade': 'fg_made',
+                        'fieldGoalsAttempted': 'fg_attempted',
+                        'threePointsMade': 'three_pointers',
+                        'threePointsAttempted': 'three_pointers_attempted',
+                        'freeThrowsMade': 'ft_made',
+                        'freeThrowsAttempted': 'ft_attempted',
+                        'assists': 'assists',
+                        'steals': 'steals',
+                        'blocks': 'blocks',
+                        'turnovers': 'turnovers',
+                        'points': 'points',
+                        'rebounds': 'rebounds',
+                        'fantasy': 'fantasy_points',
+                        })
+
+df['fg_pct'] = df.fg_made / df.fg_attempted
+df['ft_pct'] = df.ft_made / df.ft_attempted
+df['three_point_pct'] = df.three_pointers / df.three_pointers_attempted
+df = df.fillna(0)
 
 game_date = dt.datetime.now().date()
 df['game_date'] = game_date
 df.head(15)
 
-# %%
-dm.delete_from_db('Player_Stats', 'NumberFire_Projections', f"game_date='{game_date}'", create_backup=False)
-dm.write_to_db(df, 'Player_Stats', 'NumberFire_Projections', 'append')
+if df.player[0] != 'No Data':
+    dm.delete_from_db('Player_Stats', 'NumberFire_Projections', f"game_date='{game_date}'", create_backup=False)
+    dm.write_to_db(df, 'Player_Stats', 'NumberFire_Projections', 'append')
 
 #%%
 
@@ -461,37 +552,11 @@ df.player = df.player.apply(dc.name_clean)
 df['game_date'] = dt.datetime.now().date()
 df.head(15)
 
-#%%
-
 dm.delete_from_db('Player_Stats', 'SportsLine_Projections', f"game_date='{dt.datetime.now().date()}'", create_backup=False)
 dm.write_to_db(df, 'Player_Stats', 'SportsLine_Projections', 'append')
 
 
-#%%
 
-import os
-today_month = dt.datetime.now().month
-today_day = str(dt.datetime.now().day).zfill(2)
-today_year = dt.datetime.now().year
-
-game_date = dt.datetime.now().date()
-fname = f'FantasyPros_NBA_Daily_Fantasy_Basketball_Projections_({today_month}_{today_day})_.csv'
-
-try: os.replace(f"/Users/borys/Downloads/{fname}", 
-                f'{root_path}/Data/OtherData/Fantasy_Pros/{fname}')
-except: pass
-
-df = pd.read_csv(f'{root_path}/Data/OtherData/Fantasy_Pros/{fname}').dropna(axis=0)
-df.columns = ['player', 'team', 'position', 'opponent', 'points', 'rebounds', 
-              'assists', 'blocks', 'steals', 'fg_pct', 'ft_pct', 'three_pointers', 'games_played', 'minutes', 'turnovers']
-
-df['game_date'] = game_date
-
-df.player = df.player.apply(dc.name_clean)
-df.team = df.team.apply(lambda x: x.lstrip().rstrip())
-
-dm.delete_from_db('Player_Stats', 'FantasyPros', f"game_date='{game_date}'", create_backup=False)
-dm.write_to_db(df, 'Player_Stats', 'FantasyPros', if_exist='append')
 
 #%%
 
@@ -615,8 +680,7 @@ nba_stats = NBAStats()
 import time
 
 yesterday_date = dt.datetime.now().date()-dt.timedelta(1)
-# for i in range(17, 25):
-#     yesterday_date = dt.datetime(2024, 11, i).date()
+# yesterday_date = dt.datetime(2025, 2, 13).date()
 
 box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score', yesterday_date)
 time.sleep(1)
@@ -669,54 +733,12 @@ for game_date in dm.read("SELECT DISTINCT game_date FROM Box_Score", 'Player_Sta
 
 # %%
 
-# get NBA schedule data as JSON
-import requests
-year = '2023'
-r = requests.get('https://data.nba.com/data/10s/v2015/json/mobile_teams/nba/' + year + '/league/00_full_schedule.json')
-json_data = r.json()
 
-# prepare output files
-data = []
+# for t in ['Advanced_Stats', 'Box_Score', 'Draftkings_Odds', 'Hustle_Stats', 'Tracking_Data','Usage_Stats',
+#           'FantasyData', 'NumberFire_Projections', 'FantasyPros', 'SportsLine_Projections']:
+    
+#     df = dm.read(f"SELECT * FROM {t}", 'Player_Stats')
+#     try: df.player = df.player.apply(dc.name_clean)
+#     except: df.PLAYER_NAME = df.PLAYER_NAME.apply(dc.name_clean)
 
-# loop through each month/game and write out stats to file
-for i in range(len(json_data['lscd'])):
-    for j in range(len(json_data['lscd'][i]['mscd']['g'])):
-        gamedate = json_data['lscd'][i]['mscd']['g'][j]['gdte']
-        etm = json_data['lscd'][i]['mscd']['g'][j]['etm']
-        stt = json_data['lscd'][i]['mscd']['g'][j]['stt']
-        game_id = json_data['lscd'][i]['mscd']['g'][j]['gid']
-        visiting_team = json_data['lscd'][i]['mscd']['g'][j]['v']['ta']
-        home_team = json_data['lscd'][i]['mscd']['g'][j]['h']['ta']
-        data.append([gamedate, etm, stt, game_id, home_team, visiting_team])
-
-df = pd.DataFrame(data, columns=['game_date', 'game_time', 'standard_time', 'game_id','home_team', 'away_team'])
-team_update = {
-               'GSW': 'GS',
-               'PHX': 'PHO',
-               'NOP': 'NO',
-               'NYK': 'NY',
-               'SAS': 'SA'
-               }
-for ot, nt in team_update.items():
-    df.loc[df.home_team==ot, 'home_team'] = nt
-    df.loc[df.away_team==ot, 'away_team'] = nt
-
-dm.write_to_db(df, 'Team_Stats', 'NBA_Schedule', 'replace')
-
-# %%
-
-
-import sqlite3
-
-for t in ['FantasyData', 'NumberFire_Projections', 'FantasyPros', 'SportsLine_Projections']:
-    conn = sqlite3.connect('c:/Users/borys/Downloads/Player_Stats_Update.sqlite3')
-    df = pd.read_sql_query(f"SELECT * FROM {t}  ", conn)
-    game_dates = list(df.game_date.unique())
-    game_dates.append('0')
-    dm.delete_from_db('Player_Stats', t, f"game_date IN {tuple(game_dates)}", create_backup=False)
-    dm.write_to_db(df, 'Player_Stats', t, 'append')
-
-# conn = sqlite3.connect('c:/Users/borys/Downloads/Team_Stats.sqlite3')
-# df = pd.read_sql_query(f"SELECT * FROM Draftkings_Odds WHERE game_date >= '2024-02-20' ", conn)
-# dm.write_to_db(df, 'Team_Stats', 'Draftkings_Odds', 'append')
-# %%
+#     dm.write_to_db(df, 'Player_Stats', t, 'replace', True)

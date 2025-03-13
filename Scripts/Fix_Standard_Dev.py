@@ -113,3 +113,4 @@ def get_std_splines(df, metrics, show_plot=False, k=2, s=2000, min_grps_den=100,
             show_spline_fit(models, met, X, y, X_max, y_max, iso_spline)
             
     return models['std_dev'], models['perc_99'], models['perc_1']
+

@@ -1,5 +1,4 @@
 #%%
-
 # core packages
 import pandas as pd
 import numpy as np
@@ -19,13 +18,13 @@ from hyperopt import hp, fmin, tpe, Trials
 from sklearn.preprocessing import StandardScaler
 from Fix_Standard_Dev import *
 from joblib import Parallel, delayed
-from skmodel import SciKitModel
+from skmodel import SciKitModel,ProbabilityEstimator, TruncatedNormalEstimator
 from sklearn.pipeline import Pipeline
-
+import re
 from joblib import Parallel, delayed
 import warnings
 warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
-
+from sklearn.model_selection import KFold
 
 root_path = ffgeneral.get_main_path('NBA_SGP')
 db_path = f'{root_path}/Data/'
@@ -36,7 +35,6 @@ pd.set_option('display.max_columns', None)
 pd.set_option('display.width', 1000)
 pd.set_option('display.colheader_justify', 'center')
 pd.set_option('display.precision', 3)
-
 
 #====================
 # Data Loading Functions
@@ -84,8 +82,6 @@ def train_predict_split(df, run_params):
     print('Shape of Train Set', df_train.shape)
 
     return df_train, df_predict, output_start
-
-
 
         
 #====================
@@ -273,11 +269,11 @@ def load_all_stack_pred(model_output_path, metric):
 def fit_and_predict(m_label, m, df_predict, X, y, proba):
 
     try:
-        cols = m.steps[0][-1].columns
+        cols = m.named_steps['random_select'].columns
         cols = [c for c in cols if c in X.columns]
         X = X[cols]
         X_predict = df_predict[cols]
-        m = Pipeline(m.steps[1:])
+        m.steps = [(name, trans) for (name, trans) in m.steps if name != "random_sample"]
     except:
         X_predict = df_predict[X.columns]
         
@@ -631,6 +627,180 @@ def create_value_compare_col(X):
             X[c + '_over_value'] = X[c] / X.value
     return X
 
+#-----------------------
+# Adding distribution features
+#-----------------------
+
+def group_quantile_columns(df):
+    """
+    Groups quantile columns by model type from a DataFrame.
+    
+    Parameters:
+    df (pandas.DataFrame): DataFrame containing quantile columns
+    
+    Returns:
+    dict: Dictionary with model types as keys and lists of column names as values
+    """
+    # Get all quantile columns
+    quant_cols = [col for col in df.columns if col.startswith('quant_')]
+    
+    # Create a dictionary to store model-specific columns
+    model_groups = {}
+    
+    # Define the pattern to match quantile columns
+    pattern = r'quant_(\d+\.\d+)_(\w+)_q'
+    
+    # Group columns by model type
+    for col in quant_cols:
+        match = re.match(pattern, col)
+        if match:
+            quantile, model = match.groups()
+            if model not in model_groups:
+                model_groups[model] = []
+            model_groups[model].append(col)
+    
+    # Sort columns within each group to ensure they're in order
+    for model in model_groups:
+        model_groups[model].sort()
+    
+    return model_groups
+
+def get_quantile_values(df, model_type):
+    """
+    Gets the quantile columns for a specific model type.
+    
+    Parameters:
+    df (pandas.DataFrame): DataFrame containing quantile columns
+    model_type (str): Model type to extract (e.g., 'qr', 'lgbm', 'gbm', etc.)
+    
+    Returns:
+    pandas.DataFrame: DataFrame containing only the specified model's quantile columns
+    """
+    groups = group_quantile_columns(df)
+    if model_type in groups:
+        return df[groups[model_type]]
+    else:
+        raise ValueError(f"No quantile columns found for model type: {model_type}")
+
+def get_quantile_mapping(columns):
+    """
+    Creates a dictionary mapping column names to their quantile values.
+    
+    Parameters:
+    columns (list): List of quantile column names
+    
+    Returns:
+    dict: Dictionary mapping column names to their quantile values as floats
+    """
+    pattern = r'quant_(\d+\.\d+)_\w+_q'
+    mapping = {}
+    
+    for col in columns:
+        match = re.match(pattern, col)
+        if match:
+            quantile = float(match.group(1))
+            mapping[col] = quantile
+    
+    return mapping
+
+def fit_predict_truncnorm_kfold(X, y, groups, value_col, n_splits=5, random_state=42):
+    """
+    Performs k-fold cross validation for TruncatedNormalEstimator for multiple model groups.
+    
+    Parameters:
+    X (pd.DataFrame): Input features dataframe
+    y (pd.Series): Target values
+    groups (dict): Dictionary of model groups and their quantile columns
+    value_col (pd.Series): Values to use in predict_proba
+    n_splits (int): Number of folds for cross-validation
+    random_state (int): Random state for reproducibility
+    
+    Returns:
+    pd.DataFrame: DataFrame with predictions for each model type
+    dict: Dictionary of fitted models for each fold and model type
+    """
+    # Initialize KFold
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+    
+    # Dictionary to store predictions and fitted models
+    predictions = {}
+    fitted_models = {model: [] for model in groups.keys()}
+    
+    # Perform k-fold for each model type
+    for model, q_columns in groups.items():
+        # Initialize array for predictions
+        fold_predictions = np.zeros(len(X))
+        
+        # Perform k-fold cross validation
+        for fold, (train_idx, val_idx) in enumerate(kf.split(X)):
+            
+            # Initialize and fit model on training data
+            trunc_norm = TruncatedNormalEstimator(
+                spline_type='spline',
+                n_groups_min=0.03,
+                n_groups_max=0.06
+            )
+            
+            # Fit on training fold
+            trunc_norm.fit(
+                X.iloc[train_idx][q_columns],
+                y.iloc[train_idx]
+            )
+            
+            # Predict on validation fold
+            fold_predictions[val_idx] = trunc_norm.predict_proba(
+                X.iloc[val_idx][q_columns],
+                value_col.iloc[val_idx]
+            )
+            
+            # Store fitted model
+            fitted_models[model].append(trunc_norm)
+        
+        # Store predictions for this model type
+        predictions[f'{model}_trunc_prob'] = fold_predictions
+    
+    # Convert predictions to DataFrame
+    predictions_df = pd.DataFrame(predictions, index=X.index)
+    
+    return predictions_df, fitted_models
+
+def prod_dist_features(X_stack_class, X_predict_class, y_stack_trunc):
+
+    for c in X_stack_class.columns:
+        if 'quant' in c: 
+            X_stack_class.loc[(X_stack_class[c].isnull()) | (X_stack_class[c]<0), c] = 0
+            X_predict_class.loc[(X_predict_class[c].isnull()) | (X_predict_class[c]<0), c] = 0
+
+    # Get all model groups
+    groups = group_quantile_columns(X_stack_class)
+    y_stack_trunc = pd.merge(X_stack_class[['player', 'year']], y_stack_trunc, on=['player', 'year'])
+
+    start_time = time.time()
+    # Run k-fold cross validation
+    predictions_df, _ = fit_predict_truncnorm_kfold(X_stack_class, y_stack_trunc.y_act, groups=groups,
+                                                    value_col=X_stack_class.value, n_splits=5)
+    print(f"Time taken for k-fold cross validation: {time.time() - start_time} seconds")
+
+    # Add predictions to original dataframe
+    X_stack_class = X_stack_class.join(predictions_df)
+
+    for model, q_columns in groups.items():
+        start_time = time.time()
+        trunc_norm = TruncatedNormalEstimator(spline_type='spline', n_groups_min=0.03, n_groups_max=0.06)
+        trunc_norm.fit(X_stack_class[q_columns], y_stack_trunc.y_act)
+        X_predict_class[f'{model}_trunc_prob'] = trunc_norm.predict_proba(X_predict_class[q_columns], X_predict_class.value)
+        print(f"Time taken for TruncatedNormalEstimator {model}: {time.time() - start_time} seconds")
+
+
+        start_time = time.time()
+        # For each model type, get its quantile mapping
+        quantile_map = get_quantile_mapping(q_columns)
+        poisson_estimator = ProbabilityEstimator('poisson', quantile_map)
+        X_stack_class[f'{model}_poisson'] = poisson_estimator.calc_exceedance_probs(X_stack_class, threshold_column='value')
+        X_predict_class[f'{model}_poisson'] = poisson_estimator.calc_exceedance_probs(X_predict_class, threshold_column='value')
+        print(f"Time taken for ProbabilityEstimator {model}: {time.time() - start_time} seconds")
+
+    return X_stack_class, X_predict_class
 
 #-----------------------
 # Saving validations
@@ -673,7 +843,7 @@ def rename_existing(old_study_db, new_study_db, study_name):
 
     import datetime as dt
     new_study_name = study_name + '_' + dt.datetime.now().strftime('%Y%m%d%H%M%S')
-    optuna.copy_study(from_study_name=study_name, from_storage=old_study_db, to_storage=new_study_db, to_study_name=new_study_name)
+    optuna.copy_study(from_study_name=study_name, from_storage=new_study_db, to_storage=new_study_db, to_study_name=new_study_name)
     optuna.delete_study(study_name=study_name, storage=new_study_db)
 
 
@@ -782,7 +952,7 @@ def run_stack_models(fname, final_m, i, model_obj, alpha, X_stack, y_stack, run_
 def get_func_params(model_obj, alpha):
 
     model_list = {
-        'reg': ['rf', 'gbm', 'gbmh', 'mlp', 'cb', 'huber', 'xgb', 'lgbm', 'knn', 'ridge', 'lasso', 'bridge', 'enet'],
+        'reg': ['rf', 'gbm', 'gbmh', 'mlp', 'cb', 'huber', 'xgb', 'lgbm', 'knn', 'ridge', 'lasso', 'bridge', 'enet', 'cb_p', 'cb_t', 'lgbm_p', 'lgbm_t', 'xgb_p', 'xgb_t'],
         'class': ['rf_c', 'gbm_c', 'gbmh_c', 'xgb_c','lgbm_c', 'knn_c', 'lr_c', 'mlp_c', 'cb_c'],
         'quantile': ['qr_q', 'gbm_q', 'lgbm_q', 'gbmh_q', 'rf_q', 'cb_q']#, 'knn_q']
     }
@@ -952,7 +1122,7 @@ def create_metric_split_columns_backfill(df, metric_split):
 
 def create_y_act_backfill(df, metric):
 
-    if metric in ('points_assists', 'points_rebounds', 'points_rebounds_assists', 'steals_blocks', 'assists_rebounds'):
+    if metric in ('points_assists', 'points_rebounds', 'points_rebounds_assists', 'assists_rebounds'):
         metric_split = metric.split('_')
         df[f'y_act_{metric}'] = df[['y_act_' + c for c in metric_split]].sum(axis=1)
         df = create_metric_split_columns_backfill(df, metric_split)
@@ -962,7 +1132,7 @@ def create_y_act_backfill(df, metric):
 def get_all_past_results(run_params):
 
     attach_pts, run_params = load_data(run_params)
-    for metric in ['points_assists', 'points_rebounds', 'points_rebounds_assists', 'steals_blocks', 'assists_rebounds']:
+    for metric in ['points_assists', 'points_rebounds', 'points_rebounds_assists', 'assists_rebounds']:
         attach_pts = create_y_act_backfill(attach_pts, metric)
 
     attach_cols = ['player', 'game_date']
@@ -1023,16 +1193,23 @@ def create_metric_split_columns_stack(df, metric, individual_cats):
 
 run_params = {
     
-    # set year and week to analyze
-    'last_train_date_orig': '2024-11-11',
-    'train_date_orig': '2024-11-28',
+    # # set year and week to analyze
+
+    # 'last_train_date_orig': '2024-12-14',
+    # 'train_date_orig': '2025-01-10',
+    # 'test_time_split_orig': '2025-03-08',
+
+    'last_train_date_orig': '2025-01-10',
+    'train_date_orig': '2025-02-01',
     'test_time_split_orig': dt.date.today().strftime('%Y-%m-%d'),
+    
+    'db_stack_predict_last': 'Stack_Predict_2025',
 
     'metrics':  [
-                'points', 'assists', 'rebounds',
-                'points_assists', 'points_rebounds',
-                'points_rebounds_assists', 'assists_rebounds', 
-                'three_pointers',  'blocks', 'steals', 'steals_blocks', 
+                 'points', 'assists', 'rebounds', 'three_pointers', 
+                 'assists_rebounds', 'points_assists', 'points_rebounds',
+                # 'points_rebounds_assists', 'blocks', 'steals', 'steals_blocks', 
+                   
     ],
 
     # opt params    
@@ -1044,18 +1221,19 @@ run_params = {
 
     # set version and iterations
     'pred_vers': 'mse1_brier1',
+    #  'stack_model': 'random_full_stack_ind_cats',
+    # 'stack_model_class': 'random_full_stack_ind_cats',
     # 'stack_model': 'random_kbest',
     # 'stack_model_class': 'random_kbest',
-    # 'stack_model': 'random_full_stack',
-    # 'stack_model_class': 'random_full_stack',
-    'stack_model': 'random_full_stack_ind_cats',
-    'stack_model_class': 'random_full_stack_ind_cats',
+    'stack_model': 'random_full_stack',
+    'stack_model_class': 'random_full_stack',
+   
     'parlay': False,
 
     'opt_type': 'optuna',
     'hp_algo': 'tpe',
     'num_past_trials': 100,
-    'optuna_timeout': 60*3,
+    'optuna_timeout': 60*2.5,
     'n_iters': 50
 }
 
@@ -1073,8 +1251,6 @@ matt_wt = 0
 
 alpha = 80
 class_cut = 80
-
-set_weeks = [6]
 
 pred_vers = 'mse1_brier1'
 reg_ens_vers = f"{s_mod}_mae{mae_wt}_rsq{r2_wt}_mse{mse_wt}_include{min_inc}_kfold{kfold}"
@@ -1172,11 +1348,15 @@ for metric in run_params['metrics']:
     X_predict_class_player = X_predict_class.copy()
     X_stack = X_stack.drop(['player', 'year'], axis=1)
     X_predict = X_predict.drop(['player', 'week', 'year'], axis=1)
+    y_stack_trunc = y_stack.copy()
     y_stack = y_stack.drop(['player', 'year'], axis=1).y_act
 
     odds = pull_odds(metric, run_params['parlay'])
     X_stack_class = pd.merge(X_stack_class, odds, on=['player', 'year'])
     X_predict_class = pd.merge(X_predict_class, odds, on=['player', 'year'])
+
+    print('Calculating Probabilities')
+    X_stack_class, X_predict_class = prod_dist_features(X_stack_class, X_predict_class, y_stack_trunc)
 
     X_stack_class = create_value_columns(X_stack_class, metric)
     X_predict_class = create_value_columns(X_predict_class, metric)
@@ -1226,7 +1406,7 @@ for metric in run_params['metrics']:
 
 #%%
 
-if run_params['stack_model'] == 'random_kbest':
+if run_params['stack_model'] == 'random_full_stack_ind_cats':
 
     cut_time = (dt.datetime.strptime(run_params['train_date_orig'], '%Y-%m-%d') - dt.timedelta(50))
     cut_time = cut_time.strftime('%Y-%m-%d').replace('-', '')
@@ -1329,8 +1509,9 @@ def create_save_path(decimal_cut_greater, decimal_cut_less, val_greater, val_les
     decimal_cut_less_lbl = decimal_cut_less.replace('<=', 'lessequal')
     val_greater_lbl = val_greater.replace('>', 'greater')
     val_less_lbl = val_less.replace('<', 'less')
-    save_path = f'{root_path}/Model_Outputs/{foldername}/{wt_col}_{decimal_cut_greater_lbl}_{decimal_cut_less_lbl}_{include_under}_{val_greater_lbl}_{val_less_lbl}'
-    return save_path
+    save_name = f'{wt_col}_{decimal_cut_greater_lbl}_{decimal_cut_less_lbl}_{include_under}_{val_greater_lbl}_{val_less_lbl}'
+    save_path = f'{root_path}/Model_Outputs/{save_name}'
+    return save_name
 
 def get_date_info(df):
     df['real_date'] = pd.to_datetime(df['game_date'].astype('str'), format='%Y%m%d')
@@ -1353,7 +1534,7 @@ def train_split(train_pred, test_date, num_back_days=45, cv_time_input=None, i=2
 
     return train_pred, test_pred, cv_time_input
 
-def preprocess_X(df, wt_col, cv_time_input=None):
+def preprocess_X(df, wt_col, model, cv_time_input=None):
     X = df[['decimal_odds', 'value', 'prob_over', 'pred_mean', 'pred_q25', 'pred_q50', 'pred_q75']].copy()
     X = create_value_compare_col(X)
 
@@ -1361,13 +1542,14 @@ def preprocess_X(df, wt_col, cv_time_input=None):
         X['decimal_odds_twomax'] = X.decimal_odds
         X.loc[X.decimal_odds_twomax > 2, 'decimal_odds_twomax'] = 2-(1/X.loc[X.decimal_odds_twomax > 2, 'decimal_odds_twomax'])
 
-    X = pd.concat([
-                   X, 
-                   pd.get_dummies(df.metric), 
-                   pd.get_dummies(df.day_of_week, prefix='day'),
-                   pd.get_dummies(df.month, prefix='month'),
-                   pd.get_dummies(df.train_date, prefix='train_date'),
-                   ], axis=1)
+    if model != 'cb_c':
+        X = pd.concat([
+                    X, 
+                    pd.get_dummies(df.metric), 
+                    pd.get_dummies(df.day_of_week, prefix='day'),
+                    pd.get_dummies(df.month, prefix='month'),
+                    pd.get_dummies(df.train_date, prefix='train_date'),
+                    ], axis=1)
     
     if cv_time_input is not None: 
         X = pd.concat([df[['player','team', 'game_date']], X], axis=1)
@@ -1378,7 +1560,8 @@ def preprocess_X(df, wt_col, cv_time_input=None):
 
 def flip_probs(df, pred_col='final_pred'):
 
-    df.loc[df[pred_col] < 0.5, 'y_act'] = np.where(df.loc[df[pred_col] < 0.5, 'y_act']==1, 0, 1)
+    df.y_act = df.y_act.astype(int)
+    df.loc[df[pred_col] < 0.5, 'y_act'] = 1 - df.loc[df[pred_col] < 0.5, 'y_act']
     df.loc[df[pred_col] < 0.5, 'decimal_odds'] = (1 / (1 - (1/df.loc[df[pred_col] < 0.5, 'decimal_odds']))) - 0.2
     df.loc[df[pred_col] < 0.5, pred_col] = 1-df.loc[df[pred_col] < 0.5, pred_col]
     return df
@@ -1505,98 +1688,71 @@ def top_all_choices(df, prob_col, all_label, choices, remove_combos, remove_thre
     choices[all_label] = fill_choices_dict(choices[all_label], df)
     return df, choices
 
+def rename_existing_stack(new_study_db, study_name):
 
-#==============
-# Output Functions
-#==============
+    import datetime as dt
+    new_study_name = str(study_name) + '_' + dt.datetime.now().strftime('%Y%m%d%H%M%S')
+    optuna.copy_study(from_study_name=study_name, from_storage=new_study_db, to_storage=new_study_db, to_study_name=new_study_name)
+    optuna.delete_study(study_name=study_name, storage=new_study_db)
+
+
+def get_new_study_stack(old_db, new_db, old_name, new_name, num_trials):
     
-def reset_table(read_tablename, write_tablename, db_name='Simulation'):
+    old_storage = optuna.storages.RDBStorage(
+                                url=old_db,
+                                engine_kwargs={"pool_size": 64, 
+                                            "connect_args": {"timeout": 60},
+                                            },
+                                )
+    
+    new_storage = optuna.storages.RDBStorage(
+                                url=new_db,
+                                engine_kwargs={"pool_size": 64, 
+                                            "connect_args": {"timeout": 60},
+                                            },
+                                )
+    
+    if old_name is not None:
+        old_study = optuna.create_study(
+            study_name=old_name,
+            storage=old_storage,
+            load_if_exists=True
+        )
+    
     try:
-        df = dm.read(f"SELECT * FROM {read_tablename} LIMIT 1",db_name)
-        df = df.drop(0, axis=0)
-        dm.write_to_db(df, db_name, write_tablename, 'replace', create_backup=False)
-    except Exception as e:
-        print(e)
+        next_study = optuna.create_study(
+            study_name=new_name, 
+            storage=new_storage, 
+            load_if_exists=False
+        )
+
+    except:
+        rename_existing_stack(new_storage, new_name)
+        next_study = optuna.create_study(
+            study_name=new_name, 
+            storage=new_storage, 
+            load_if_exists=False
+        )
+    
+    try:
+        if old_name is not None and len(old_study.trials) > 0:
+            print(f"Loaded {new_name} study with {old_name} {len(old_study.trials)} trials")
+            next_study.add_trials(old_study.trials[-num_trials:])
+    except:
         pass
 
+    return next_study
+    
 
-def calc_all_sgp_winnings(prob_types, prob_dfs, prob_cols, choices):
+def get_optuna_study_stack(save_name, game_date, last_game_date):
+    time.sleep(1*np.random.random())
+    old_name = last_game_date
+    new_name = game_date
+    old_db = f"sqlite:///optuna/predict_optimize/{save_name}.sqlite3"
+    new_db = f"sqlite:///optuna/predict_optimize/{save_name}.sqlite3"
+    next_study = get_new_study_stack(old_db, new_db, old_name, new_name, num_trials=50)
+    return next_study
 
-    # calculate winnings from various sgp choices
-    for prob_type, prob_df, prob_col in zip(prob_types, prob_dfs, prob_cols):
-        for remove_combos in [True, False]:
-            for remove_threes in [True, False]:
-                all_label = f'all_{prob_type}_{remove_combos}_{remove_threes}'
-                if all_label not in choices.keys(): choices[all_label] = get_choices_dict()
-                _, choices = top_all_choices(prob_df, prob_col, all_label, choices, remove_combos, remove_threes)
-                
-                for matchup_rank in [0, 1, 2]:
-                    for num_matchups in [1, 2, 3]:
-                        cur_lbl = f'{prob_type}_{remove_combos}_{remove_threes}_{matchup_rank}_{num_matchups}'
-                        if cur_lbl not in choices.keys(): choices[cur_lbl] = get_choices_dict()
-                        _, choices = top_sgp_choices(cur_lbl, prob_df, prob_col, choices, matchup_rank, num_matchups, remove_combos, remove_threes)
-    return choices
-
-
-def format_choices_output(choice_df, win_type):
-    choice_df = pd.melt(choice_df.T.reset_index(), id_vars=['index'])
-    choice_df.columns = ['start_spot', 'num_choices', win_type]
-
-    return choice_df
-
-def calc_pct_stats(df):
-    for c in ['num_correct', 'num_wins', 'winnings', 'num_trials', 'num_choices']:
-        df[c] = df[c].astype(float)
-    df['num_correct_pct'] = df.num_correct / ((df.num_trials*df.num_choices)+0.000001)
-    df['num_wins_pct'] = df.num_wins / (df.num_trials+0.000001)
-    df.num_correct_pct = df.num_correct_pct.round(3)
-    df.num_wins_pct = df.num_wins_pct.round(3)
-    df.winnings = df.winnings.round(1)
-    return df
-
-# save out all the various combinations by extracting from dictionary
-def save_sgp_results(dbname, tablename, choices, game_dates, val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, ens_vers):
-    for prob_type in ['stack_model', 'original', 'avg']:
-        for remove_combos in [True, False]:
-            for remove_threes in [True, False]:
-                for matchup_rank in [0, 1, 2]:
-                    for num_matchups in [1, 2, 3]:
-                        cur_lbl = f'{prob_type}_{remove_combos}_{remove_threes}_{matchup_rank}_{num_matchups}'
-                        for i, win_type in enumerate(['num_correct', 'num_wins', 'winnings', 'num_trials']):
-                            choice_df = aggregate_choices(choices[cur_lbl][win_type])
-                            choice_df = format_choices_output(choice_df, win_type)
-                            if i==0: choice_df_all = choice_df.copy()
-                            else: choice_df_all = pd.merge(choice_df_all, choice_df, on=['start_spot', 'num_choices'])
-
-                        choice_df_all = calc_pct_stats(choice_df_all)
-                        choice_df_all = choice_df_all.assign(value_cut_greater=val_greater, value_cut_less=val_less, wt_col=wt_col, 
-                                                            decimal_cut_greater=decimal_cut_greater, decimal_cut_less=decimal_cut_less,rank_order=prob_type, 
-                                                            include_under=include_under, last_date=game_dates[-1], ens_vers=ens_vers)
-                        choice_df_all = choice_df_all.assign(bet_type='sgp', matchup_rank=matchup_rank, num_matchups=num_matchups, 
-                                                             no_combos=remove_combos, remove_threes=remove_threes)
-
-                        dm.write_to_db(choice_df_all, dbname, tablename, 'append', create_backup=False)
-
-def save_all_results(dbname, tablename, choices, game_dates, val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, ens_vers):
-    for prob_type in ['stack_model', 'original', 'avg']:
-        for remove_combos in [True, False]:
-            for remove_threes in [True, False]:
-                cur_lbl = f'all_{prob_type}_{remove_combos}_{remove_threes}'
-                for i, win_type in enumerate(['num_correct', 'num_wins', 'winnings', 'num_trials']):
-                    choice_df = aggregate_choices(choices[cur_lbl][win_type])
-                    choice_df = format_choices_output(choice_df, win_type)
-                    if i==0: choice_df_all = choice_df.copy()
-                    else: choice_df_all = pd.merge(choice_df_all, choice_df, on=['start_spot', 'num_choices'])
-
-                
-                choice_df_all = calc_pct_stats(choice_df_all)
-                choice_df_all = choice_df_all.assign(value_cut_greater=val_greater, value_cut_less=val_less, wt_col=wt_col, 
-                                                    decimal_cut_greater=decimal_cut_greater, decimal_cut_less=decimal_cut_less,rank_order=prob_type, 
-                                                    include_under=include_under, last_date=game_dates[-1], ens_vers=ens_vers)
-                choice_df_all = choice_df_all.assign(bet_type='all', matchup_rank=np.nan, num_matchups=np.nan, 
-                                                     no_combos=remove_combos, remove_threes=remove_threes)
-
-                dm.write_to_db(choice_df_all, dbname, tablename, 'append', create_backup=False)
 
 #%%
 
@@ -1644,10 +1800,12 @@ for cut_name, cut_dict in query_cuts.items():
                 AND decimal_odds {decimal_cut_greater}
                 AND decimal_odds {decimal_cut_less}
                 AND ens_vers = '{ens_vers}'
+                AND metric IN ('points', 'assists', 'rebounds', 'three_pointers',
+                               'assists_rebounds', 'points_assists', 'points_rebounds')
             ORDER BY game_date ASC
             '''
 
-    trials_obj = get_past_trials(ens_vers, decimal_cut_greater, decimal_cut_less, val_greater, val_less, wt_col, include_under='')
+    model = 'lr_c'
 
     train_pred = dm.read(q, 'Simulation')
     train_pred = train_pred.drop('y_act', axis=1).rename(columns={'y_act_prob': 'y_act'})
@@ -1655,33 +1813,29 @@ for cut_name, cut_dict in query_cuts.items():
     train_pred = train_pred.dropna().reset_index(drop=True)
     train_pred, test_pred, cv_time_input = train_split(train_pred, test_date=test_date, num_back_days=60)
     
-    X_train = preprocess_X(train_pred, wt_col, cv_time_input)
-    X_test = preprocess_X(test_pred, wt_col, cv_time_input)
+    X_train = preprocess_X(train_pred, wt_col, model, cv_time_input)
+    X_test = preprocess_X(test_pred, wt_col, model, cv_time_input)
     y_train = train_pred.y_act
 
-    model_obj = 'class'
-    final_m = 'lr_c'
-    skm, _, _ = get_skm(pd.concat([X_train, y_train], axis=1), model_obj, to_drop=[])
-    pipe, params = get_full_pipe(skm, final_m, stack_model='random_kbest', alpha=None, 
-                            min_samples=10, bayes_rand='bayes')
-    params['random_sample__frac'] = hp.uniform('frac', 0.5, 1)
     
     if rank_order in ['stack_model', 'avg']:
-        try:
-            best_model, _, stack_pred, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
-                                                        n_iter=10, alpha=None, wt_col=wt_col,
-                                                        trials=trials_obj, bayes_rand='bayes',
-                                                        run_adp=False, print_coef=False,
-                                                        proba=True, num_k_folds=run_params['num_k_folds'],
-                                                        random_state=(i*2)+(i*7))
+        save_name = create_save_path(decimal_cut_greater, decimal_cut_less, val_greater, val_less, wt_col, include_under='', foldername='pick_choices')
+        last_run_date = find_last_run(ens_vers, tablename='Stack_Model_Predict', dbname=run_params['db_stack_predict_last'])
 
-        except:
-            best_model, _, stack_pred, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
-                                                        n_iter=10, alpha=None, wt_col=wt_col,
-                                                        trials=Trials(), bayes_rand='bayes',
-                                                        run_adp=False, print_coef=False,
-                                                        proba=True, num_k_folds=run_params['num_k_folds'],
-                                                        random_state=(i*2)+(i*7))
+        skm, _, _ = get_skm(pd.concat([X_train, y_train], axis=1), model_obj='class', to_drop=[])
+        pipe, params = get_full_pipe(skm,  model, stack_model='random_kbest', alpha=None, 
+                                        min_samples=10, bayes_rand='optuna')
+        
+        params['random_sample__frac'] = ['real', 0.2, 1]
+        params['k_best_c__k'] = ['int', 3, X_train.shape[1]]
+
+        trials = get_optuna_study_stack(save_name, test_date, '')
+        best_model, _, stack_pred, trial_obj = skm.best_stack(pipe, params, X_train, y_train, 
+                                                                n_iter=25, alpha=None, wt_col=wt_col,
+                                                                trials=trials, bayes_rand='optuna',
+                                                                run_adp=False, print_coef=False,
+                                                                proba=True, num_k_folds=run_params['num_k_folds'],
+                                                                random_state=(i*2)+(i*7), optuna_timeout=180)
             
         show_calibration_curve(y_train, stack_pred['stack_pred'], n_bins=8)
 
@@ -1717,9 +1871,8 @@ for cut_name, cut_dict in query_cuts.items():
             preds_avg, _ = top_all_choices(preds_avg, 'avg_prob', 'xx', dummy_dict, remove_combos, remove_threes)
 
     
-    if rank_order=='stack_model': display(preds_stack.sort_values(by='final_pred', ascending=False).head(50))
-    elif rank_order=='original': display(preds_orig.sort_values(by='prob_over', ascending=False).head(50))
-    elif rank_order=='avg': display(preds_avg.sort_values(by='avg_prob', ascending=False).head(50))
+    if rank_order=='stack_model': display(preds_stack.sort_values(by='final_pred', ascending=False).head(10))
+    elif rank_order=='original': display(preds_orig.sort_values(by='prob_over', ascending=False).head(10))
+    elif rank_order=='avg': display(preds_avg.sort_values(by='avg_prob', ascending=False).head(10))
 
-#%%
-
+# %%

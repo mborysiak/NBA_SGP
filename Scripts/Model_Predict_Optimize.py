@@ -1,4 +1,10 @@
 #%%
+# from ff import general as ffgeneral
+# from ff.db_operations import DataManage
+
+# root_path = ffgeneral.get_main_path('NBA_SGP')
+# db_path = f'{root_path}/Data/'
+# dm = DataManage(db_path, timeout=200)
 
 # # If starting a new year, use this code to initiate the database
 # old_year = 2024
@@ -202,8 +208,6 @@ def load_pickle(path, fname):
         loaded_object = pickle.load(f)
         return loaded_object
 
-
-#%%
 #==========
 # General Setting
 #==========
@@ -451,10 +455,11 @@ def preprocess_X(df, wt_col, cv_time_input=None):
     return X
 
 def flip_probs(df, pred_col='final_pred'):
-
-    df.loc[df[pred_col] < 0.5, 'y_act'] = np.where(df.loc[df[pred_col] < 0.5, 'y_act']==1, 0, 1)
+    df.y_act = df.y_act.astype(int)
+    df.loc[df[pred_col] < 0.5, 'y_act'] = 1 - df.loc[df[pred_col] < 0.5, 'y_act']
+    
     df.loc[df[pred_col] < 0.5, 'decimal_odds'] = (1 / (1 - (1/df.loc[df[pred_col] < 0.5, 'decimal_odds']))) - 0.2
-    df.loc[df[pred_col] < 0.5, pred_col] = 1-df.loc[df[pred_col] < 0.5, pred_col]
+    df.loc[df[pred_col] < 0.5, pred_col] = 1 - df.loc[df[pred_col] < 0.5, pred_col]
     return df
 
 #=================
@@ -693,8 +698,8 @@ def calc_pct_stats(df):
     return df
 
 # save out all the various combinations by extracting from dictionary
-def save_sgp_results(dbname, tablename, choices, game_dates, val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, ens_vers):
-    for prob_type in ['stack_model', 'original', 'avg']:
+def save_sgp_results(dbname, tablename, choices, game_dates, prob_cols, val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, ens_vers):
+    for prob_type in prob_cols:
         for remove_combos in [True, False]:
             for remove_threes in [True, False]:
                 for matchup_rank in [0, 1, 2]:
@@ -715,8 +720,8 @@ def save_sgp_results(dbname, tablename, choices, game_dates, val_greater, val_le
 
                         dm.write_to_db(choice_df_all, dbname, tablename, 'append', create_backup=False)
 
-def save_all_results(dbname, tablename, choices, game_dates, val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, ens_vers):
-    for prob_type in ['stack_model', 'original', 'avg']:
+def save_all_results(dbname, tablename, choices, game_dates, prob_cols, val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, ens_vers):
+    for prob_type in prob_cols:
         for remove_combos in [True, False]:
             for remove_threes in [True, False]:
                 cur_lbl = f'all_{prob_type}_{remove_combos}_{remove_threes}'
@@ -752,6 +757,9 @@ def calc_stack_model(dbname, tablename, last_run_date, ens_vers, wt_col, decimal
                 AND decimal_odds {decimal_cut_less}
                 AND ens_vers = '{ens_vers}'
                 AND y_act IS NOT NULL
+                AND metric IN ('points', 'assists', 'rebounds', 'three_pointers',
+                               'assists_rebounds', 'points_assists', 'points_rebounds')
+                AND game_date > 20240601
             ORDER BY game_date ASC
             '''
 
@@ -766,111 +774,121 @@ def calc_stack_model(dbname, tablename, last_run_date, ens_vers, wt_col, decimal
         train_pred_all = dm.read(q, 'Simulation')
 
         for test_date in game_dates:
-            print('Date:', test_date)
 
-            train_pred = train_pred_all.copy()
-            train_pred = train_pred.drop('y_act', axis=1).rename(columns={'y_act_prob': 'y_act'})
-            train_pred = get_date_info(train_pred)
-            train_pred = train_pred.dropna().reset_index(drop=True)
-            train_pred, test_pred, cv_time_input = train_split(train_pred, test_date=test_date, num_back_days=num_back_days, i=i)
+            try:
+                print('Date:', test_date)
+
+                train_pred = train_pred_all.copy()
+                train_pred = train_pred.drop('y_act', axis=1).rename(columns={'y_act_prob': 'y_act'})
+                train_pred = get_date_info(train_pred)
+                train_pred = train_pred.dropna().reset_index(drop=True)
+                train_pred, test_pred, cv_time_input = train_split(train_pred, test_date=test_date, num_back_days=num_back_days, i=i)
+                
+                X_train = preprocess_X(train_pred, wt_col, cv_time_input)
+                X_test = preprocess_X(test_pred, wt_col, cv_time_input)
+                y_train = train_pred.y_act
+
+                trials = get_optuna_study(save_name, test_date, last_test_date)
+
+                skm, _, _ = get_skm(pd.concat([X_train, y_train], axis=1), model_obj='class', to_drop=[])
+                pipe, params = get_full_pipe(skm,  'lr_c', stack_model='random_kbest', alpha=None, 
+                                            min_samples=10, bayes_rand='optuna')
+                
+                params['random_sample__frac'] = ['real', 0.2, 1]
+                params['k_best_c__k'] = ['int', 3, X_train.shape[1]]
+
+                best_model, _, _, _ = skm.best_stack(pipe, params, X_train, y_train, 
+                                                    n_iter=num_trials, alpha=None, wt_col=wt_col,
+                                                    trials=trials, bayes_rand='optuna',
+                                                    run_adp=False, print_coef=False,
+                                                    proba=True, num_k_folds=run_params['num_k_folds'],
+                                                    random_state=(i*2)+(i*7), optuna_timeout=120)
+
+                for c in X_train.columns:
+                    if c not in X_test.columns:
+                        X_test[c] = 0
+
+                X_test = X_test[X_train.columns]
+                best_model.fit(X_train, y_train)
+
+                preds_orig = test_pred.reset_index(drop=True).copy()
+                preds_stack = pd.Series(np.round(best_model.predict_proba(X_test)[:,1], 3), name='final_pred')
+                preds_stack = pd.concat([preds_stack, preds_orig], axis=1)
+                preds_stack = preds_stack[['player', 'game_date', 'team', 'opponent', 'metric', 'value', 'decimal_odds', 
+                                            'prob_over', 'final_pred', 'y_act']]
+                
+                preds_stack = preds_stack.assign(value_cut_greater=val_greater, value_cut_less=val_less, wt_col=wt_col, 
+                                                decimal_cut_greater=decimal_cut_greater, decimal_cut_less=decimal_cut_less, ens_vers=ens_vers)
+                last_test_date = test_date
+                dm.write_to_db(preds_stack, dbname, tablename, 'append', create_backup=False)
             
-            X_train = preprocess_X(train_pred, wt_col, cv_time_input)
-            X_test = preprocess_X(test_pred, wt_col, cv_time_input)
-            y_train = train_pred.y_act
+            except:
+                pass
 
-            trials = get_optuna_study(save_name, test_date, last_test_date)
-
-            skm, _, _ = get_skm(pd.concat([X_train, y_train], axis=1), model_obj='class', to_drop=[])
-            pipe, params = get_full_pipe(skm,  'lr_c', stack_model='random_kbest', alpha=None, 
-                                         min_samples=10, bayes_rand='optuna')
-            params['random_sample__frac'] = ['real', 0.2, 1]
-            params['k_best_c__k'] = ['int', 3, X_train.shape[1]]
-
-            best_model, _, _, _ = skm.best_stack(pipe, params, X_train, y_train, 
-                                                n_iter=num_trials, alpha=None, wt_col=wt_col,
-                                                trials=trials, bayes_rand='optuna',
-                                                run_adp=False, print_coef=False,
-                                                proba=True, num_k_folds=run_params['num_k_folds'],
-                                                random_state=(i*2)+(i*7), optuna_timeout=120)
-
-            for c in X_train.columns:
-                if c not in X_test.columns:
-                    X_test[c] = 0
-
-            X_test = X_test[X_train.columns]
-            best_model.fit(X_train, y_train)
-
-            preds_orig = test_pred.reset_index(drop=True).copy()
-            preds_stack = pd.Series(np.round(best_model.predict_proba(X_test)[:,1], 3), name='final_pred')
-            preds_stack = pd.concat([preds_stack, preds_orig], axis=1)
-            preds_stack = preds_stack[['player', 'game_date', 'team', 'opponent', 'metric', 'value', 'decimal_odds', 
-                                        'prob_over', 'final_pred', 'y_act']]
-            
-            preds_stack = preds_stack.assign(value_cut_greater=val_greater, value_cut_less=val_less, wt_col=wt_col, 
-                                            decimal_cut_greater=decimal_cut_greater, decimal_cut_less=decimal_cut_less, ens_vers=ens_vers)
-            last_test_date = test_date
-            dm.write_to_db(preds_stack, dbname, tablename, 'append', create_backup=False)
-
-# #-------------
-# # Set Tables
-# #-------------
-# save_tablename = 'Stack_Model_Predict_Staging'
-# last_run_tablename = 'Stack_Model_Predict'
-# db_stack_predict = 'Stack_Predict_2025'
-# db_stack_predict_last = 'Stack_Predict_2024'
-# reset_table('Stack_Model_Predict_Staging', 'Stack_Model_Predict_Staging', db_stack_predict)
-
-# #--------------
-# # Set Params
-# #--------------
+#-------------
+# Set Tables
+#-------------
+save_tablename = 'Stack_Model_Predict_Staging'
+last_run_tablename = 'Stack_Model_Predict'
+db_stack_predict = 'Stack_Predict_2025'
+db_stack_predict_last = 'Stack_Predict_2025'
 
 
-# for ens_vers in [
-#     'random_kbest_matt0_brier1_include2_kfold3', 
-#      'random_full_stack_matt0_brier1_include2_kfold3',
-#      'random_full_stack_ind_cats_matt0_brier1_include2_kfold3'
-#     ]:
+#%%
+#--------------
+# Set Params
+#--------------
+
+for ens_vers in [
+    'random_kbest_matt0_brier1_include2_kfold3', 
+     'random_full_stack_matt0_brier1_include2_kfold3',
+     'random_full_stack_ind_cats_matt0_brier1_include2_kfold3'
+    ]:
+
+    dm.delete_from_db(db_stack_predict, 'Stack_Model_Predict_Staging', f"ens_vers='{ens_vers}'", create_backup=False)
     
-#     last_run_date = find_last_run(ens_vers, tablename=last_run_tablename, dbname=db_stack_predict_last)
-#     print('Last Run Date', last_run_date)
-
-#     wt_col_list=[None, 'decimal_odds', 'decimal_odds_twomax']
-#     decimal_cut_greater_list = ['>0', '>=1.7']
-#     decimal_cut_less_list = ['<=2.3', '<=3']
-#     val_greater_list = ['>0', '>0.5' ,'>1.5', '>2.5', '>3.5', '>4.5', '>5.5']
-#     val_less_list = ['<100', '<40', '<30', '<20', '<15']
-
-#     iter_cats = list(set(itertools.product(wt_col_list, decimal_cut_greater_list, decimal_cut_less_list, val_greater_list, val_less_list)))
-
-#     #------------
-#     # Run
-#     #------------
-
-#     # for wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less in iter_cats[:1]:
-#     #     calc_stack_model(db_stack_predict, save_tablename, last_run_date, ens_vers, wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less)
-
-#     out = Parallel(n_jobs=-1, verbose=50)(
-#         delayed(calc_stack_model)
-#         (db_stack_predict, save_tablename, last_run_date, ens_vers, wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less) 
-#         for wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less in iter_cats
-#     )
-
-# #------------
-# # Transfer from Staging to Prod
-# #------------
+    last_run_date = find_last_run(ens_vers, tablename=last_run_tablename, dbname=db_stack_predict_last)
+    last_run_date = int(last_run_date)
     
-# for ens_vers in [
-#                 'random_kbest_matt0_brier1_include2_kfold3', 
-#                 'random_full_stack_matt0_brier1_include2_kfold3',
-#                 'random_full_stack_ind_cats_matt0_brier1_include2_kfold3'
-#                  ]:
-#     print(ens_vers)
-#     df = dm.read(f"SELECT * FROM Stack_Model_Predict_Staging WHERE ens_vers='{ens_vers}'", db_stack_predict)
-#     dm.write_to_db(df, db_stack_predict, 'Stack_Model_Predict', 'append', create_backup=False)
-#     del df
-#     gc.collect()
+    print('Last Run Date', last_run_date)
+
+    wt_col_list=[None, 'decimal_odds', 'decimal_odds_twomax']
+    decimal_cut_greater_list = ['>=1.5', '>=1.75']
+    decimal_cut_less_list = ['<=2.0', '<=2.5']
+    val_greater_list = ['>1.5', '>2.5', '>3.5', '>4.5', '>5.5']
+    val_less_list = ['<100', '<30', '<20', '<10']
+
+    iter_cats = list(set(itertools.product(wt_col_list, decimal_cut_greater_list, decimal_cut_less_list, val_greater_list, val_less_list)))
+
+    #------------
+    # Run
+    #------------
+
+    # for wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less in iter_cats[:1]:
+    #     calc_stack_model(db_stack_predict, save_tablename, last_run_date, ens_vers, wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less)
+
+    out = Parallel(n_jobs=16, verbose=50)(
+        delayed(calc_stack_model)
+        (db_stack_predict, save_tablename, last_run_date, ens_vers, wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less) 
+        for wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less in iter_cats
+    )
+
+#------------
+# Transfer from Staging to Prod
+#------------
+
+for ens_vers in [
+                'random_kbest_matt0_brier1_include2_kfold3', 
+                'random_full_stack_matt0_brier1_include2_kfold3',
+                'random_full_stack_ind_cats_matt0_brier1_include2_kfold3'
+                 ]:
+    print(ens_vers)
+    df = dm.read(f"SELECT * FROM Stack_Model_Predict_Staging WHERE ens_vers='{ens_vers}'", db_stack_predict)
+    dm.write_to_db(df, db_stack_predict, 'Stack_Model_Predict', 'append', create_backup=False)
+    del df
+    gc.collect()
     
-# create_indexes(f'{db_path}/{db_stack_predict}.sqlite3', 'Stack_Model_Predict_Staging')
+create_indexes(f'{db_path}/{db_stack_predict}.sqlite3', 'Stack_Model_Predict_Staging')
 
 
 #%%
@@ -891,7 +909,7 @@ def run_past_choices(db_stack_predict, db_results, pull_tablename, save_tablenam
                             AND ens_vers = '{ens_vers}'
                             AND wt_col {wt_col_q}
                             AND y_act IS NOT NULL
-                            AND game_date >= '20241110'
+                            AND game_date >= 20250207
                             ORDER BY game_date''', db_stack_predict).game_date.values
     
     all_sgp_choices = {}
@@ -907,6 +925,8 @@ def run_past_choices(db_stack_predict, db_results, pull_tablename, save_tablenam
                                 AND decimal_cut_less = '{decimal_cut_less}'
                                 AND ens_vers = '{ens_vers}'
                                 AND wt_col {wt_col_q}
+                                AND metric IN ('points', 'assists', 'rebounds', 'three_pointers',
+                                               'assists_rebounds', 'points_assists', 'points_rebounds')
                                 AND y_act IS NOT NULL''', db_stack_predict)
             
             # Convert numeric columns once
@@ -926,9 +946,14 @@ def run_past_choices(db_stack_predict, db_results, pull_tablename, save_tablenam
                 preds_stack = flip_probs(preds_stack, pred_col='final_pred')
                 preds_avg = flip_probs(preds_avg, pred_col='avg_prob')
 
-            prob_types = ['stack_model', 'original', 'avg']
-            prob_dfs = [preds_stack, preds_orig, preds_avg]
-            prob_cols = ['final_pred', 'prob_over', 'avg_prob']
+            if wt_col is None:
+                prob_types = ['stack_model', 'original', 'avg']
+                prob_dfs = [preds_stack, preds_orig, preds_avg]
+                prob_cols = ['final_pred', 'prob_over', 'avg_prob']
+            else:
+                prob_types = ['stack_model', 'avg']
+                prob_dfs = [preds_stack, preds_avg]
+                prob_cols = ['final_pred', 'avg_prob']
 
             preds_stack.y_act = preds_stack.y_act.astype(int)
             preds_orig.y_act = preds_orig.y_act.astype(int)
@@ -942,15 +967,13 @@ def run_past_choices(db_stack_predict, db_results, pull_tablename, save_tablenam
             del preds_avg
             gc.collect()
             
-        save_sgp_results(db_results, save_tablename, all_sgp_choices, game_dates, val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, ens_vers)
-        save_all_results(db_results, save_tablename, all_sgp_choices, game_dates, val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, ens_vers)
+        save_sgp_results(db_results, save_tablename, all_sgp_choices, game_dates, prob_types, val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, ens_vers)
+        save_all_results(db_results, save_tablename, all_sgp_choices, game_dates, prob_types, val_greater, val_less, wt_col, decimal_cut_greater, decimal_cut_less, include_under, ens_vers)
 
         del game_dates
         all_sgp_choices.clear()
         gc.collect()
     
-
-                
 
 #-------------
 # Set Tables
@@ -971,16 +994,15 @@ ens_vers_list = [
                  ]
 
 for ens_vers in ens_vers_list:
-    if ens_vers == 'random_kbest_matt0_brier1_include2_kfold3':
-        reset_table('Probability_Choices_Staging', 'Probability_Choices_Staging', db_results)
+    dm.delete_from_db('Results', 'Probability_Choices_Staging', f"ens_vers='{ens_vers}'", create_backup=False)
 
     print(ens_vers)
     wt_col_list=[None, 'decimal_odds', 'decimal_odds_twomax']
-    decimal_cut_greater_list = ['>0', '>=1.7']
-    decimal_cut_less_list = ['<=2.3', '<=3']
-    val_greater_list = ['>0', '>0.5' ,'>1.5', '>2.5', '>3.5', '>4.5', '>5.5']
-    val_less_list = ['<100', '<40', '<30', '<20', '<15']
-    include_under_list = [False, True]
+    decimal_cut_greater_list = ['>=1.5', '>=1.75']
+    decimal_cut_less_list = ['<=2.0', '<=2.5']
+    val_greater_list = ['>1.5', '>2.5', '>3.5', '>4.5', '>5.5']
+    val_less_list = ['<100', '<30', '<20', '<10']
+    include_under_list = [True]
 
     iter_cats = list(set(itertools.product(wt_col_list, decimal_cut_greater_list, decimal_cut_less_list, 
                                            include_under_list, val_greater_list, val_less_list)))
@@ -993,14 +1015,81 @@ for ens_vers in ens_vers_list:
     #     past_choice_result = run_past_choices(db_stack_predict, db_results, pull_tablename, save_tablename, ens_vers, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less)
 
     
-    out = Parallel(n_jobs=16, verbose=1)(
+    out = Parallel(n_jobs=8, verbose=1)(
         delayed(run_past_choices)
         (db_stack_predict, db_results, pull_tablename, save_tablename, ens_vers, wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less) 
         for wt_col, decimal_cut_greater, decimal_cut_less, include_under, val_greater, val_less in iter_cats
     )
+#%%
 
+prob_choices_staging = dm.read(f"SELECT * FROM Probability_Choices_Staging", 'Results')
+prob_choices_staging[['matchup_rank', 'num_matchups']] = prob_choices_staging[['matchup_rank', 'num_matchups']].fillna(-1).astype(int)
+prob_choices_staging.wt_col = prob_choices_staging.wt_col.fillna('None')
+
+query_cuts_df = dm.read(f"SELECT * FROM Best_Choices", 'Simulation')
+query_cuts_df.date_run = pd.to_datetime(query_cuts_df.date_run)
+query_cuts_df = query_cuts_df[query_cuts_df.date_run==query_cuts_df.date_run.max()].reset_index(drop=True)
+query_cuts_df.wt_col = query_cuts_df.wt_col.fillna('None')
+
+query_cuts = {}
+for i, row in query_cuts_df.iterrows():
+    row.label = row.label + row.ens_vers
+    query_cuts[row.label] = {}
+    query_cuts[row.label]= row.to_dict()
+    # if query_cuts[row.label]['wt_col'] == 'None': query_cuts[row.label]['wt_col'] = None
+
+all_staging = pd.DataFrame()
+for cut_name, cut_dict in query_cuts.items():
+
+    ens_vers = cut_dict['ens_vers']
+    start_spot = cut_dict['start_spot']
+    num_choices = cut_dict['num_choices']
+    decimal_cut_greater = cut_dict['decimal_cut_greater']
+    decimal_cut_less = cut_dict['decimal_cut_less']
+    val_greater = cut_dict['value_cut_greater']
+    val_less = cut_dict['value_cut_less']
+    wt_col = cut_dict['wt_col']
+    include_under = int(cut_dict['include_under'])
+    rank_order = cut_dict['rank_order']
+    bet_type = cut_dict['bet_type']
+    remove_combos = int(cut_dict['no_combos'])
+    remove_threes = int(cut_dict['remove_threes'])
+    if bet_type=='sgp':
+        matchup_rank = int(cut_dict['matchup_rank'])
+        num_matchups = int(cut_dict['num_matchups'])
+    else:
+        matchup_rank = -1
+        num_matchups = -1
+
+    cur_staging = (
+        prob_choices_staging[
+            (prob_choices_staging.ens_vers==ens_vers) &
+            (prob_choices_staging.decimal_cut_greater==decimal_cut_greater) &
+            (prob_choices_staging.decimal_cut_less==decimal_cut_less) &
+            (prob_choices_staging.value_cut_greater==val_greater) &
+            (prob_choices_staging.value_cut_less==val_less) &
+            (prob_choices_staging.wt_col==wt_col) &
+            (prob_choices_staging.include_under==include_under) &
+            (prob_choices_staging.ens_vers==ens_vers) &
+            (prob_choices_staging.bet_type==bet_type) &
+            (prob_choices_staging.rank_order==rank_order) &
+            (prob_choices_staging.no_combos==remove_combos) &
+            (prob_choices_staging.remove_threes==remove_threes) &
+            (prob_choices_staging.matchup_rank==matchup_rank) &
+            (prob_choices_staging.num_matchups==num_matchups) &
+            (prob_choices_staging.start_spot==start_spot) &
+            (prob_choices_staging.num_choices==num_choices)
+        ])
+
+    all_staging = pd.concat([all_staging, cur_staging], axis=0)
+
+all_staging.sort_values(by='winnings', ascending=False)
 
 #%%
+
+min_date, max_date = dm.read(f'''SELECT min(game_date), max(game_date) 
+                                 FROM Stack_Model_Predict_Staging
+                                ''', db_stack_predict).values[0]
 
 for i, cur_ens_vers in enumerate([
                      'random_kbest_matt0_brier1_include2_kfold3', 
@@ -1011,6 +1100,11 @@ for i, cur_ens_vers in enumerate([
                         FROM Probability_Choices_Staging 
                         WHERE ens_vers = '{cur_ens_vers}'  
                     ''', db_results)
+    
+
+    if i==0: dm.write_to_db(staging, db_results, f'Probability_Choices_{min_date}_{max_date}', 'replace')
+    else: dm.write_to_db(staging, db_results, f'Probability_Choices_{min_date}_{max_date}', 'append')
+
     final = dm.read(f'''SELECT * 
                         FROM Probability_Choices
                         WHERE ens_vers = '{cur_ens_vers}'
@@ -1060,7 +1154,7 @@ from lightgbm import LGBMRegressor
 from sklearn.model_selection import RandomizedSearchCV
 from sklearn.model_selection import KFold
 
-def choice_param_training_data(use_cats=True, max_start_spot=8, min_trials=50):
+def choice_param_training_data(use_cats=True, frac=1):
 
     choice_params = dm.read(f'''
                                 SELECT * 
@@ -1069,11 +1163,14 @@ def choice_param_training_data(use_cats=True, max_start_spot=8, min_trials=50):
                                            AND wt_col IS NOT NULL)
                                       AND NOT (bet_type='all' 
                                                AND matchup_rank IS NOT NULL)    
-                                      AND start_spot <= {max_start_spot}  
-                                      AND num_trials > {min_trials}
-                            ''', 'Results').sample(frac=1).reset_index(drop=True)
+                                      AND num_trials > (SELECT 0.8*max(num_trials) FROM Probability_Choices)
+                            ''', 'Results').sample(frac=frac).reset_index(drop=True)
 
-    X = choice_params.drop(['winnings', 'num_correct', 'num_wins', 'num_correct_pct', 'num_wins_pct'], axis=1)
+    choice_params['winnings_rnd'] = choice_params.winnings.astype('int')
+    choice_params = choice_params.drop_duplicates(subset=['num_correct', 'num_wins', 
+                                                          'num_trials', 'winnings_rnd']).reset_index(drop=True)
+
+    X = choice_params.drop(['winnings', 'num_correct', 'num_wins', 'num_correct_pct', 'num_wins_pct', 'winnings_rnd'], axis=1)
     y_winnings = choice_params.winnings
     y_win_pct = choice_params.num_wins_pct
     y_num_correct_pct = choice_params.num_correct_pct
@@ -1150,15 +1247,15 @@ def calc_kelly_criterion(pred):
     return pred
 
 params = {
-    'n_estimators': range(300, 600, 25),
-    'num_leaves': range(300, 750, 25),
+    'n_estimators': range(100, 300, 25),
+    'num_leaves': range(100, 300, 25),
     'min_child_samples': range(50, 400, 25),
     'learning_rate': [0.25, 0.3, 0.35, 0.4, 0.45],
     'subsample': [0.75, 0.8, 0.85, 0.9, 0.95, 1]
 }
 
 lgbm = LGBMRegressor(n_jobs=16) 
-X, y_winnings, y_win_pct, y_num_correct_pct = choice_param_training_data(use_cats=True, max_start_spot=3, min_trials=60)
+X, y_winnings, y_win_pct, y_num_correct_pct = choice_param_training_data(use_cats=True, frac=1)
 fp = FoldPredict(f'{root_path}/Model_Outputs/Final_LGBM/', retrain=True)
 
 #%%
@@ -1168,6 +1265,7 @@ fp.cross_fold_train('num_correct_pct', lgbm, params, X, y_num_correct_pct, n_ite
 
 #%%
 
+X, y_winnings, y_win_pct, y_num_correct_pct = choice_param_training_data(use_cats=True, frac=1)
 winnings_pr = fp.cross_fold_predict('winnings', X, y_winnings)
 win_pct_pr = fp.cross_fold_predict('win_pct', X, y_win_pct)
 num_correct_pct_pr = fp.cross_fold_predict('num_correct_pct', X, y_num_correct_pct)
@@ -1181,57 +1279,72 @@ print('R2 Score', np.round(r2_score(pred.winnings, pred.winnings_pred), 4))
 pred.plot.scatter(x='winnings', y='winnings_pred')
 
 pred.num_matchups = pred.num_matchups.astype(float)
-pred['winnings_pred_comb'] = (pred.winnings_pred*2 + pred.winnings)/3
+pred['winnings_pred_comb'] = (pred.winnings_pred + pred.winnings)/2
 pred = pred.sort_values(by='winnings_pred_comb', ascending=False).reset_index(drop=True)
 
-pred['win_pct_comb'] = (pred.win_pct_pred*2 + pred.num_wins_pct)/3
-pred['num_correct_pct_comb'] = (pred.num_correct_pct_pred*2 + pred.num_correct_pct)/3
+pred['win_pct_comb'] = (pred.win_pct_pred + pred.num_wins_pct)/2
+pred['num_correct_pct_comb'] = (pred.num_correct_pct_pred + pred.num_correct_pct)/2
 # pred = pred.sort_values(by='win_pct_comb', ascending=False).reset_index(drop=True)
 
 #%%
-
-correct_pct_cut = 0.63
-start_spot_max = 3
 
 import pprint
 best_results = {}
 
 for i, ens_v in enumerate(['random_kbest_matt0_brier1_include2_kfold3',
-              'random_full_stack_matt0_brier1_include2_kfold3', 
-              'random_full_stack_ind_cats_matt0_brier1_include2_kfold3']):
+                            'random_full_stack_matt0_brier1_include2_kfold3', 
+                            'random_full_stack_ind_cats_matt0_brier1_include2_kfold3']):
 
     print('=============\n', ens_v, '\n=============')
     
-    best_overall = (
+    best_sgp_10 = (
         pred[
              (pred.ens_vers==ens_v) & 
-             (pred.win_pct_comb > 0.15)
-             ]).head(25)
-    display(best_overall) 
+             (pred.win_pct_comb > 0.1) & 
+             (pred.num_choices >= 4) &
+             (pred.num_matchups==1)
+             ]).sort_values(by='winnings_pred_comb', ascending=False).head(5)
+    display(best_sgp_10) 
 
-    best_espn_sgp =  (
+    best_sgp_15 = (
         pred[
              (pred.ens_vers==ens_v) & 
-             (pred.win_pct_comb > 0.25)
-             ]
-             ).head(25)
-    display(best_espn_sgp) 
+             (pred.win_pct_comb > 0.15) &
+             (pred.num_choices >= 4) &
+             (pred.num_matchups==1)
+             ]).sort_values(by='winnings_pred_comb', ascending=False).head(5)
+    display(best_sgp_15) 
 
-    best_dk_sgp =  (
+    best_overall_10 = (
         pred[
              (pred.ens_vers==ens_v) & 
-             (pred.win_pct_comb > 0.3) & 
-             (pred.num_matchups == 1) &
-             (pred.bet_type=='sgp')
-             ]
-             ).head(25)
-    display(best_dk_sgp)
+             (pred.win_pct_comb > 0.10) & 
+             (pred.num_choices >= 4)
+             ]).sort_values(by='winnings_pred_comb', ascending=False).head(5)
+    display(best_overall_10) 
 
-   
+    best_overall_15 = (
+        pred[
+             (pred.ens_vers==ens_v) & 
+             (pred.win_pct_comb > 0.15) &
+             (pred.num_choices >= 4)
+             ]).sort_values(by='winnings_pred_comb', ascending=False).head(5)
+    display(best_overall_15) 
 
-    save_out = pd.DataFrame(best_overall.iloc[0]).T.assign(label = 'overall', date_run = pd.to_datetime('today').strftime('%Y-%m-%d'))
-    save_out = pd.concat([save_out, pd.DataFrame(best_dk_sgp.iloc[0]).T.assign(label = 'dk_sgp', date_run = pd.to_datetime('today').strftime('%Y-%m-%d'))])
-    save_out = pd.concat([save_out, pd.DataFrame(best_espn_sgp.iloc[0]).T.assign(label = 'espn_sgp', date_run = pd.to_datetime('today').strftime('%Y-%m-%d'))])
+    
+    save_out = pd.DataFrame(best_sgp_10.iloc[0]).T.assign(label = 'min_10%_sgp', date_run = pd.to_datetime('today').strftime('%Y-%m-%d'))
+    
+    best_overall_10 = best_overall_10[best_overall_10.index.isin(save_out.index)==False]
+    save_out = pd.concat([save_out, pd.DataFrame(best_overall_10.iloc[0]).T.assign(label = 'min_10%', date_run = pd.to_datetime('today').strftime('%Y-%m-%d'))])
+    
+    best_sgp_15 = best_sgp_15[best_sgp_15.index.isin(save_out.index)==False]
+    save_out = pd.concat([save_out, pd.DataFrame(best_sgp_15.iloc[0]).T.assign(label = 'min_15%_sgp', date_run = pd.to_datetime('today').strftime('%Y-%m-%d'))])
+    
+    best_overall_15 = best_overall_15[best_overall_15.index.isin(save_out.index)==False]
+    save_out = pd.concat([save_out, pd.DataFrame(best_overall_15.iloc[0]).T.assign(label = 'min_15%', date_run = pd.to_datetime('today').strftime('%Y-%m-%d'))])
+  #  save_out = pd.concat([save_out, pd.DataFrame(best_high_win_actual.iloc[0]).T.assign(label = 'min_25%_actual', date_run = pd.to_datetime('today').strftime('%Y-%m-%d'))])
+
+    save_out = save_out.drop_duplicates()
 
     for c in ['start_spot','include_under', 'last_date', 'no_combos', 'remove_threes']:
         save_out[c] = save_out[c].astype('int')
@@ -1243,4 +1356,4 @@ for i, ens_v in enumerate(['random_kbest_matt0_brier1_include2_kfold3',
     dm.delete_from_db('Simulation', 'Best_Choices', del_str, create_backup=False)
     dm.write_to_db(save_out, 'Simulation', 'Best_Choices', 'append', create_backup=False)
 
-# %%
+#%%

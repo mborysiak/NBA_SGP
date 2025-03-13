@@ -1,7 +1,6 @@
 #%%
 
 import pandas as pd 
-import pyarrow.parquet as pq
 import numpy as np
 from ff.db_operations import DataManage
 from ff import general as ffgeneral
@@ -109,7 +108,7 @@ def sportsline_data(df):
     for c in ['sl_points', 'sl_trb', 'sl_assists', 'sl_blocks',
               'sl_steals', 'sl_turnovers', 'sl_fg_pct', 'sl_ft_pct',
               'sl_minutes', 'sl_fantasy_points', 'sl_free_throws']:
-        try: sl[c] = sl[c].apply(lambda x: float(x.replace('-', '0')))
+        try: sl[c] = sl[c].apply(lambda x: float(str(x).replace('-', '0')))
         except: pass
 
     df = pd.merge(df, sl, on=['player', 'game_date'], how='left')
@@ -124,17 +123,24 @@ def fantasy_pros(df):
                     ''', 'Player_Stats')
 
     fp['is_home'] = np.where(fp.opponent.apply(lambda x: x.split(' ')[0])=='vs', 1, 0)     
-    fp = fp.drop(['position', 'team', 'games_played', 'opponent'], axis=1)
+    fp = fp.drop(['position', 'games_played', 'opponent'], axis=1)
     fp.columns = ['fp_' + c if c not in ('player', 'team', 'opponent', 'game_date', 'is_home') else c for c in fp.columns ]
-    
+    fp = fp.rename(columns={'team': 'team_fp'})
+
     df = pd.merge(df, fp, on=['player', 'game_date'], how='outer')
+    df.loc[~df.team_fp.isnull(), 'team'] = df.loc[~df.team_fp.isnull(), 'team_fp']
+    df = df.drop('team_fp', axis=1)
     df = df.fillna({'is_home': 0.5})
+    df.fp_ft_pct = df.fp_ft_pct.astype('float')
 
     return df
 
 def numberfire(df):
     
-    nf = dm.read(f"SELECT * FROM NumberFire_Projections", 'Player_Stats')
+    nf = dm.read('''SELECT player, fantasy_points, salary, value, minutes, 
+                           points, rebounds, assists, steals, blocks, turnovers,
+                           three_pointers, game_date
+                           FROM NumberFire_Projections''', 'Player_Stats')
     nf.salary = nf.salary.apply(lambda x: int(x.replace('$', '').replace(',', '')))
     nf.columns = ['nf_' + c if c not in ('player', 'game_date') else c for c in nf.columns ]
 
@@ -232,6 +238,80 @@ def rolling_proj_stats(df, proj_cols):
 
     return df
 
+# def rolling_proj_stats(df, proj_cols):
+#     df = forward_fill(df)
+#     df = add_rolling_stats(df, ['player'], proj_cols)
+    
+#     # Create all new columns at once using a dictionary, then join them
+#     new_columns = {}
+    
+#     for c in proj_cols:
+#         # Calculate all values first
+#         rmean10_plus5 = df[f'rmean10_{c}'] + 5
+#         rmean6_plus5 = df[f'rmean6_{c}'] + 5
+        
+#         trend_diff_3v10 = df[f'rmean3_{c}'] - df[f'rmean10_{c}']
+#         trend_diff_6v10 = df[f'rmean6_{c}'] - df[f'rmean10_{c}']
+#         trend_diff_1v6 = df[c] - df[f'rmean6_{c}']
+        
+#         # Store in dictionary instead of adding to DataFrame individually
+#         new_columns[f'trend_diff_{c}3v10'] = trend_diff_3v10
+#         new_columns[f'trend_chg_{c}3v10'] = trend_diff_3v10 / rmean10_plus5
+        
+#         new_columns[f'trend_diff_{c}6v10'] = trend_diff_6v10
+#         new_columns[f'trend_chg_{c}6v10'] = trend_diff_6v10 / rmean10_plus5
+        
+#         new_columns[f'trend_diff_{c}1v6'] = trend_diff_1v6
+#         new_columns[f'trend_chg_{c}1v6'] = trend_diff_1v6 / rmean6_plus5
+    
+#     # Add all new columns at once to prevent fragmentation
+#     new_df = pd.concat([df, pd.DataFrame(new_columns, index=df.index)], axis=1)
+    
+#     return new_df
+
+# def rolling_proj_stats(df, proj_cols):
+#     df = forward_fill(df)
+#     df = add_rolling_stats(df, ['player'], proj_cols)
+    
+#     # Create dictionaries to hold our computed columns
+#     diff_columns = {}
+#     chg_columns = {}
+    
+#     # Vectorized calculation for all 3v10 trends across columns
+#     for pattern, rmean_src, rmean_dest in [
+#         ('3v10', 'rmean3_', 'rmean10_'),
+#         ('6v10', 'rmean6_', 'rmean10_'),
+#         ('1v6', '', 'rmean6_')
+#     ]:
+#         # Source columns for calculations
+#         if rmean_src:
+#             src_cols = [f"{rmean_src}{c}" for c in proj_cols]
+#         else:
+#             src_cols = proj_cols.copy()  # For the 1v6 case, use raw columns
+        
+#         # Destination columns
+#         dest_cols = [f"{rmean_dest}{c}" for c in proj_cols]
+        
+#         # Calculate differences (vectorized across all columns)
+#         for i, c in enumerate(proj_cols):
+#             # Calculate difference
+#             diff_col_name = f'trend_diff_{c}{pattern}'
+#             diff_columns[diff_col_name] = df[src_cols[i]] - df[dest_cols[i]]
+            
+#             # Calculate change
+#             chg_col_name = f'trend_chg_{c}{pattern}'
+#             denominator = df[dest_cols[i]] + 5
+#             chg_columns[chg_col_name] = diff_columns[diff_col_name] / denominator
+    
+#     # Combine all new columns with the original dataframe
+#     result = pd.concat([
+#         df,
+#         pd.DataFrame(diff_columns, index=df.index),
+#         pd.DataFrame(chg_columns, index=df.index)
+#     ], axis=1)
+    
+#     return result
+
 
 
 def proj_market_share(df, proj_col_name):
@@ -290,7 +370,8 @@ def get_box_score():
 
 def add_y_act(df, bs):
 
-    y_act = bs[['player', 'game_date', 'points', 'rebounds', 'assists', 'three_pointers', 'steals', 'blocks']].copy()
+    y_act = bs[['player', 'game_date', 'points', 'rebounds', 'assists', 'three_pointers',# 'steals', 'blocks'
+                ]].copy()
     y_act.columns = ['y_act_' + c if c not in ('player', 'game_date') else c for c in y_act.columns]
     df = pd.merge(df, y_act, on=['player', 'game_date'], how='left')
 
@@ -393,8 +474,12 @@ def add_tracking_stats(df):
     track = dm.read("SELECT * FROM Tracking_Data", 'Player_Stats')
     track = track.rename(columns={'PLAYER_NAME': 'player'})
 
+    track.MIN = track.MIN.apply(lambda x: float(str(x).replace(':','.')))
+    for c in ['TCHS', 'PASS', 'DIST', 'ORBC', 'DRBC', 'RBC']:
+        track[f'{c}_per_min'] = track[c] / (track.MIN + 5)
+
     track = track.drop(['GAME_ID', 'TEAM_ABBREVIATION', 'MIN', 'TEAM_ID', 'TEAM_CITY', 
-                    'PLAYER_ID', 'START_POSITION', 'COMMENT'], axis=1)
+                        'PLAYER_ID', 'START_POSITION', 'COMMENT'], axis=1)
     track = track.sort_values(by=['player', 'game_date']).reset_index(drop=True)
 
     r_cols = [c for c in track.columns if c not in ('player', 'game_date')]
@@ -402,7 +487,9 @@ def add_tracking_stats(df):
 
     track = track.drop(['SPD', 'DIST', 'ORBC', 'DRBC', 'RBC', 'TCHS', 'SAST', 'FTAST',
                         'PASS', 'AST', 'CFGM', 'CFGA', 'CFG_PCT', 'UFGM', 'UFGA', 'UFG_PCT',
-                        'FG_PCT', 'DFGM', 'DFGA', 'DFG_PCT'
+                        'FG_PCT', 'DFGM', 'DFGA', 'DFG_PCT',
+                        'TCHS_per_min', 'PASS_per_min', 'DIST_per_min', 'ORBC_per_min', 
+                        'DRBC_per_min', 'RBC_per_min'
                   ], axis=1)
     
     track.game_date = track.groupby('player')['game_date'].shift(-1)
@@ -437,6 +524,10 @@ def add_hustle_stats(df):
     hustle = dm.read("SELECT * FROM Hustle_Stats", 'Player_Stats')
     hustle = hustle.rename(columns={'PLAYER_NAME': 'player'})
 
+    hustle.MINUTES = hustle.MINUTES.apply(lambda x: float(str(x).replace(':','.')))
+    for c in ['CONTESTED_SHOTS', 'DEFLECTIONS', 'OFF_LOOSE_BALLS_RECOVERED', 'DEF_LOOSE_BALLS_RECOVERED']:
+        hustle[f'{c}_per_min'] = hustle[c] / (hustle.MINUTES + 5)
+
     hustle = hustle.drop(['GAME_ID', 'TEAM_ABBREVIATION', 'TEAM_ID', 'TEAM_CITY', 
                         'PLAYER_ID', 'START_POSITION', 'COMMENT', 'MINUTES', 'PTS'], axis=1)
     hustle = hustle.sort_values(by=['player', 'game_date']).reset_index(drop=True)
@@ -448,7 +539,9 @@ def add_hustle_stats(df):
                                     'CONTESTED_SHOTS_3PT', 'DEFLECTIONS', 'CHARGES_DRAWN', 'SCREEN_ASSISTS',
                                     'SCREEN_AST_PTS', 'OFF_LOOSE_BALLS_RECOVERED', 'BOX_OUTS',
                                     'DEF_LOOSE_BALLS_RECOVERED', 'LOOSE_BALLS_RECOVERED', 'OFF_BOXOUTS',
-                                    'DEF_BOXOUTS', 'BOX_OUT_PLAYER_TEAM_REBS', 'BOX_OUT_PLAYER_REBS'
+                                    'DEF_BOXOUTS', 'BOX_OUT_PLAYER_TEAM_REBS', 'BOX_OUT_PLAYER_REBS',
+                                    'CONTESTED_SHOTS_per_min', 'DEFLECTIONS_per_min', 
+                                    'OFF_LOOSE_BALLS_RECOVERED_per_min', 'DEF_LOOSE_BALLS_RECOVERED_per_min'
                                     ], axis=1)
                 
     hustle_roll.game_date = hustle_roll.groupby('player')['game_date'].shift(-1)
@@ -495,6 +588,7 @@ def add_team_tracking(df, team_or_opp):
 
 def add_team_hustle_stats(df, team_or_opp):
     team_hustle = dm.read("SELECT * FROM Hustle_Stats", 'Team_Stats')
+    team_hustle.MINUTES = team_hustle.MINUTES.apply(lambda x: float(str(x).replace(':','')))
     team_hustle  = team_hustle.rename(columns={'TEAM_ABBREVIATION': team_or_opp})
 
     team_hustle = team_hustle.drop(['GAME_ID', 'TEAM_ID', 'TEAM_CITY', 'TEAM_NAME', 'PTS'], axis=1)
@@ -513,23 +607,52 @@ def add_team_hustle_stats(df, team_or_opp):
 
 
 
-def remove_low_corrs(df, threshold):
+# def remove_low_corrs(df, threshold=0.05):
 
+#     orig_cols = df.shape[1]
+#     obj_cols = list(df.dtypes[df.dtypes=='object'].index)
+#     corrs = pd.DataFrame(np.corrcoef(df.dropna().drop(obj_cols, axis=1).values, rowvar=False), 
+#                             columns=[c for c in df.columns if c not in obj_cols],
+#                             index=[c for c in df.columns if c not in obj_cols])
+    
+#     corrs = corrs[[y for y in corrs.columns if 'y_act' in y]]
+#     corrs = corrs[~corrs.index.str.contains('y_act')]
+#     good_corrs = list(corrs[abs(corrs) >= threshold].dropna(how='all').index)
+
+#     obj_cols.extend(good_corrs)
+#     obj_cols.extend(corrs.columns)
+#     print(f'Kept {len(obj_cols)}/{orig_cols} columns')
+
+#     return df[obj_cols]
+
+
+def remove_low_corrs(data, corr_cut=60, collinear_cut=0.95):
+
+    from skmodel import SciKitModel
+    df = data.copy().dropna(axis=0).reset_index(drop=True)
+    print(df.shape)
     orig_cols = df.shape[1]
     obj_cols = list(df.dtypes[df.dtypes=='object'].index)
-    corrs = pd.DataFrame(np.corrcoef(df.dropna().drop(obj_cols, axis=1).values, rowvar=False), 
-                            columns=[c for c in df.columns if c not in obj_cols],
-                            index=[c for c in df.columns if c not in obj_cols])
-    
-    corrs = corrs[[y for y in corrs.columns if 'y_act' in y]]
-    corrs = corrs[~corrs.index.str.contains('y_act')]
-    good_corrs = list(corrs[abs(corrs) >= threshold].dropna(how='all').index)
+    obj_cols.extend([c for c in df.columns if 'y_act_' in c])
+    obj_cols = [c for c in obj_cols if c in df.columns]
 
-    obj_cols.extend(good_corrs)
-    obj_cols.extend(corrs.columns)
+    best_cols = []
+    for y_lbl in [c for c in df.columns if 'y_act_' in c]:
+
+        skm = SciKitModel(df, model_obj='reg')
+        X, y = skm.Xy_split(y_lbl, to_drop = obj_cols)
+        corr_collin = skm.piece('corr_collinear')[-1]
+        corr_collin.set_params(**{'corr_percentile': corr_cut, 'collinear_threshold': collinear_cut})
+        X = corr_collin.fit_transform(X, y)
+
+        best_cols.extend([c for c in X.columns if c not in best_cols and 'y_act' not in c])
+    
+    best_cols = list(set(best_cols))
+    obj_cols = list(set(obj_cols))
+    obj_cols.extend(best_cols)
     print(f'Kept {len(obj_cols)}/{orig_cols} columns')
 
-    return df[obj_cols]
+    return data[obj_cols]
 
 
 def available_stats(df, missing):
@@ -574,13 +697,24 @@ def add_dk_team_lines(df):
     return df
 
 
-def get_columns(df, train_date, threshold=0.05):
+# def get_columns(df, train_date, threshold=0.05):
+#     try:
+#         cols = dm.read(f"SELECT * FROM Model_Data_{train_date}", 'Model_Features').columns.tolist()
+#         cols.extend(dm.read(f"SELECT * FROM Model_Data_{train_date}v2", 'Model_Features').columns.tolist())
+#         df = df[cols]
+#     except:
+#         df = remove_low_corrs(df, threshold=threshold)
+
+#     return df
+
+def get_columns(df, train_date):
     try:
         cols = dm.read(f"SELECT * FROM Model_Data_{train_date}", 'Model_Features').columns.tolist()
-        cols.extend(dm.read(f"SELECT * FROM Model_Data_{train_date}v2", 'Model_Features').columns.tolist())
+        try: cols.extend(dm.read(f"SELECT * FROM Model_Data_{train_date}v2", 'Model_Features').columns.tolist())
+        except: pass
         df = df[cols]
     except:
-        df = remove_low_corrs(df, threshold=threshold)
+        df = remove_low_corrs(df)
 
     return df
 
@@ -833,14 +967,16 @@ def fill_vegas_stats(df, player_vegas_stats):
 
 #%%
 
-train_date = '2024-11-28'
+# train_date = '2025-01-10'
+train_date = '2025-02-01'
 max_date = dm.read("SELECT max(game_date) FROM FantasyData", 'Player_Stats').values[0][0]
 
 df = fantasy_data()
 
 days_since_training = (dt.datetime.now() - dt.datetime.strptime(train_date, '%Y-%m-%d')).days
 game_dates = df.game_date.sort_values(ascending=False).unique()
-df = df[df.game_date.isin(game_dates[:100+days_since_training])].reset_index(drop=True)
+game_dates = game_dates[:90+days_since_training]
+df = df[df.game_date.isin(game_dates)].reset_index(drop=True)
 
 df = fantasy_pros(df)
 df = numberfire(df)
@@ -903,7 +1039,7 @@ df = df.dropna(axis=0, subset=[c for c in df.columns if 'y_act' not in c]).reset
 print(df.shape)
 
 train_date = train_date.replace('-', '')
-df = get_columns(df, train_date, threshold=0.05)
+df = get_columns(df, train_date)
 print(df.game_date.max())
 print(df.shape)
 
@@ -913,87 +1049,44 @@ dm.write_to_db(df.iloc[:,:2000], 'Model_Features', f'Model_Data_{train_date}', i
 if df.shape[1] > 2000:
     dm.write_to_db(df.iloc[:,2000:], 'Model_Features', f'Model_Data_{train_date}v2', if_exist='replace')
 
+
 #%%
 
-def create_metric_split_columns(df, metric_split):
-    if len(metric_split)==2:
-        ms1 = metric_split[0]
-        ms2 = metric_split[1]
+def add_y_act(df, bs, metric):
 
-        for c in df.columns:
-            if ms1 in c:
-                try: df[f'{c}_{ms2}'] = df[c] + df[c.replace(ms1, ms2)]
-                except: pass
-
-    elif len(metric_split)==3:
-        ms1 = metric_split[0]
-        ms2 = metric_split[1]
-        ms3 = metric_split[2]
-
-        for c in df.columns:
-            if ms1 in c:
-                try: df[f'{c}_{ms2}_{ms3}'] = df[c] + df[c.replace(ms1, ms2)] + df[c.replace(ms1, ms3)]
-                except: pass
+    y_act = bs[['player', 'game_date', metric]].copy()
+    y_act.columns = ['y_act_' + c if c not in ('player', 'game_date') else c for c in y_act.columns]
+    df = pd.merge(df, y_act, on=['player', 'game_date'], how='left')
 
     return df
 
-def parlay_values(df):
-    df['value'] = np.select([
-                                df.value <= 3, 
-                                (df.value > 3) & (df.value < 10),
-                                (df.value >= 10) & (df.value < 24),
-                                (df.value >= 24) & (df.value < 30),
-                                (df.value >= 30) & (df.value < 35),
-                                (df.value >= 35) & (df.value < 40),
-                                (df.value >= 40) & (df.value < 45),
-                                (df.value >= 45)
-                            ], 
-                            
-                            [
-                                df.value,
-                                df.value - 1,
-                                df.value - 2,
-                                df.value - 3,
-                                30,
-                                35,
-                                40,
-                                df.value - 5
-                            ]
-                            )
-    
-    return df
 
-def create_y_act(df, metric):
+def pull_odds(metric, game_dates):
 
-    if metric in ('points_assists', 'points_rebounds', 'points_rebounds_assists', 'steals_blocks', 'assists_rebounds'):
-        metric_split = metric.split('_')
-        df[f'y_act_{metric}'] = df[['y_act_' + c for c in metric_split]].sum(axis=1)
-        df = create_metric_split_columns(df, metric_split)
-
-    df = df.drop([c for c in df.columns if 'y_act' in c and metric not in c], axis=1)
-    df = df.rename(columns={f'y_act_{metric}': 'y_act'})
-    return df
-
-def pull_odds(metric, run_params):
-
-    odds = dm.read(f'''SELECT player, game_date year, value
+    odds = dm.read(f'''SELECT player, game_date, value
                        FROM Draftkings_Odds 
                        WHERE stat_type='{metric}'
                              AND over_under='over'
-                             AND decimal_odds < 2.25
-                             AND decimal_odds > 1.75
+                             AND decimal_odds < 2.5
+                             AND decimal_odds > 1.5
+                             AND game_date >= '{game_dates[-1]}'
                     ''', 'Player_Stats')
-    odds.year = odds.year.apply(lambda x: int(x.replace('-', '')))
-    if run_params['parlay']: odds = parlay_values(odds)
 
     return odds
 
 def create_value_columns(df, metric):
+    try: df.value = df.value.astype(float)
+    except: pass
 
     for c in df.columns:
-        if metric in c:
-            df = pd.concat([df, pd.Series(df[c]-df.value, name=f'{c}_vs_value')], axis=1)
-            df = pd.concat([df, pd.Series(df[c]/df.value, name=f'{c}_over_value')], axis=1)
+        if metric in c and 'y_act' not in c:
+            try: 
+                df[c] = df[c].astype(float)
+                df = pd.concat([df, pd.Series(df[c]-df.value, name=f'{c}_vs_value')], axis=1)
+                df = pd.concat([df, pd.Series(df[c]/df.value, name=f'{c}_over_value')], axis=1)
+            except: 
+                pass
+           
 
     return df
 
@@ -1003,186 +1096,29 @@ def remove_low_counts(df):
     df = pd.merge(df, cnts, on='game_date')
     return df
 
-def train_predict_split(df, run_params):
-
-    # # get the train / predict dataframes and output dataframe
-    df_train = df[df.game_date < run_params['train_time_split']].reset_index(drop=True)
-    df_train = df_train.dropna(subset=['y_act']).reset_index(drop=True)
-
-    df_predict = df[df.game_date == run_params['train_time_split']].reset_index(drop=True)
-    output_start = df_predict[['player', 'game_date']].copy().drop_duplicates()
-
-    # get the minimum number of training samples for the initial datasets
-    min_samples = 100#int(df_train[df_train.game_date < run_params['cv_time_input']].shape[0])  
-    print('Shape of Train Set', df_train.shape)
-
-    return df_train, df_predict, output_start, min_samples
-
-def get_over_under_class(df, metric, run_params, model_obj='class'):
+def get_over_under_class(df, metric, game_dates):
     
-    odds = pull_odds(metric, run_params)
-    df = pd.merge(df, odds, on=['player', 'year'])
+    odds = pull_odds(metric, game_dates)
+    df = pd.merge(df, odds, on=['player', 'game_date'])
     df = df.sort_values(by='game_date').reset_index(drop=True)
 
-    if model_obj == 'class': df['y_act'] = np.where(df.y_act >= df.value, 1, 0)
-    elif model_obj == 'reg': df['y_act'] = df.y_act - df.value
-
-    df = create_value_columns(df, metric)
+    df[f'y_act_{metric}_over'] = np.where(df[f'y_act_{metric}'] >= df.value, 1, 0)
     df = remove_low_counts(df)
-    df_train_class, df_predict_class, _, _ = train_predict_split(df, run_params)
 
-    return df_train_class, df_predict_class
+    return df
 
-def show_calibration_curve(y_true, y_pred, n_bins=10, strategy='quantile'):
+data = df.copy()
+metric = 'rebounds'
+data = add_y_act(data, box_score, metric)
 
-    from sklearn.calibration import calibration_curve
+data = get_over_under_class(data, metric, game_dates)
+data = remove_low_corrs(data, metric)
+data = create_value_columns(data, metric)
+data = data.dropna(axis=0, subset=[c for c in data.columns if 'y_act' not in c]).reset_index(drop=True)
 
-    # Plot perfectly calibrated
-    plt.plot([0, 1], [0, 1], linestyle = '--', label = 'Ideally Calibrated')
-    
-    # Plot model's calibration curve
-    x, y = calibration_curve(y_true, y_pred, n_bins=n_bins, strategy='quantile')
-    plt.plot(y, x, marker = '.', label = 'Quantile')
-
-    # Plot model's calibration curve
-    x, y = calibration_curve(y_true, y_pred, n_bins=n_bins, strategy='uniform')
-    plt.plot(y, x, marker = '+', label = 'Uniform')
-    
-    leg = plt.legend(loc = 'upper left')
-    plt.xlabel('Average Predicted Probability in each bin')
-    plt.ylabel('Ratio of positives')
-    plt.show()
-
-from skmodel import SciKitModel
-from hyperopt import Trials
-from sklearn.metrics import r2_score
-import datetime as dt
-
-train_date = '20241128'
-metric = 'assists'
-model_obj = 'class'
-alpha = 0.8
-if model_obj =='class': proba = True
-else: proba = False
-
-print(metric)
-
-Xy1 = dm.read(f'SELECT * FROM Model_Data_{train_date}', f'Model_Features')
-Xy2 = dm.read(f'SELECT * FROM Model_Data_{train_date}v2', f'Model_Features')
-Xy = pd.concat([Xy1, Xy2], axis=1)
-Xy = Xy.sort_values(by=['game_date']).reset_index(drop=True)
-
-Xy.game_date = Xy.game_date.apply(lambda x: int(x.replace('-', '')))
-Xy['year'] = Xy.game_date
-Xy['week'] = 1
-
-run_params = {
-    'parlay': False,
-    'train_time_split': Xy.game_date.max(),
-    'cv_time_input': int((dt.datetime.strptime(train_date, '%Y%m%d') - dt.timedelta(days=30)).strftime('%Y%m%d'))
-}
-
-Xy = create_y_act(Xy, metric)
-train, pred = get_over_under_class(Xy, metric, run_params, model_obj='class')
-
-
-
-preds = []
-actuals = []
-
-skm = SciKitModel(train, model_obj=model_obj, alpha=alpha, hp_algo='atpe')
-to_drop = list(train.dtypes[train.dtypes=='object'].index)
-X, y = skm.Xy_split('y_act', to_drop = to_drop)
-
-if proba:
-    p = 'select_perc_c'
-    kb = 'k_best_c'
-    m = 'lgbm_c'
-else:
-    p = 'select_perc'
-    kb = 'k_best'
-    m = 'lgbm'
-
-pipe = skm.model_pipe([skm.piece('random_sample'),
-                        skm.piece('std_scale'), 
-                        # skm.piece(p),
-                        # skm.feature_union([
-                        #                skm.piece('agglomeration'), 
-                        #                 skm.piece(f'{kb}_fu'),
-                        #                 skm.piece('pca')
-                        #                 ]),
-                        skm.piece(kb),
-                        skm.piece(m)
-                    ])
-
-params = skm.default_params(pipe, 'bayes')
-
-# pipe.steps[-1][-1].set_params(**{'loss_function': f'Quantile:alpha={alpha}'})
-best_models, oof_data, param_scores, _ = skm.time_series_cv(pipe, X, y, params, n_iter=10,
-                                                            col_split='game_date',n_splits=4,
-                                                            time_split=run_params['cv_time_input'], 
-                                                            alpha=alpha,
-                                                            bayes_rand='bayes', proba=proba,
-                                                            sample_weight=False, trials=Trials(),
-                                                            random_seed=64893)
-
-print('R2 score:', r2_score(oof_data['full_hold']['y_act'], oof_data['full_hold']['pred']))
-oof_data['full_hold'].plot.scatter(x='pred', y='y_act')
-try: show_calibration_curve(oof_data['full_hold'].y_act, oof_data['full_hold'].pred, n_bins=6)
-except: pass
-
-display(oof_data['full_hold'].sort_values(by='pred', ascending=False).iloc[:50])
-display(oof_data['full_hold'].sort_values(by='pred', ascending=True).iloc[:50])
-
-
-# %%
-
-for i in range(4):
-
-    import matplotlib.pyplot as plt
-
-    pipeline = best_models[i]
-    pipeline.fit(X,y)
-    # Extract the coefficients
-    log_reg = pipeline.named_steps[m]
-
-    try:
-        log_reg.coef_.shape[1]
-        coefficients = log_reg.coef_[0]
-    except: 
-        try:
-            coefficients = log_reg.coef_
-        except:
-            coefficients = log_reg.feature_importances_
-
-    # Get the feature names from SelectKBest
-    rand_features = pipeline.steps[0][1].columns
-    X_out = X[rand_features]
-    selected_features = pipeline.named_steps[kb].get_support(indices=True)
-
-    coef = pd.Series(coefficients, index=X_out.columns[selected_features])
-    coef = coef[np.abs(coef) > 0.01].sort_values()
-    coef.plot(kind = 'barh', figsize=(8, len(coef)/3))
-    plt.show()
-
-# %%
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+dm.write_to_db(data.iloc[:,:2000], 'Model_Features', f'Test_Model_Data_{train_date}', if_exist='replace')
+if data.shape[1] > 2000:
+    dm.write_to_db(data.iloc[:,2000:], 'Model_Features', f'Test_Model_Data_{train_date}v2', if_exist='replace')
 
 # %%
 

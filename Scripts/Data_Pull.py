@@ -550,12 +550,16 @@ df = df.rename(columns=sl_cols)
 df.columns = ['sl_' + c.lower() if c not in ('player', 'pos', 'team', 'game') else c for c in df.columns ]
 df.player = df.player.apply(dc.name_clean)
 df['game_date'] = dt.datetime.now().date()
-df.head(15)
+
+df = df[df.game!='WAS@UTA'] #duplicated in data over time
+df2 = pd.merge(df, fp_teams, on=['player', 'team'])
+print('In Sportsline, but not FantasyPros:', [d for d in df.player.values if d not in df2.player.values])
+print('In FantasyPros, but not Sportsline:', [d for d in df2.player.values if d not in df.player.values])
+
+df2.head(15)
 
 dm.delete_from_db('Player_Stats', 'SportsLine_Projections', f"game_date='{dt.datetime.now().date()}'", create_backup=False)
-dm.write_to_db(df, 'Player_Stats', 'SportsLine_Projections', 'append')
-
-
+dm.write_to_db(df2, 'Player_Stats', 'SportsLine_Projections', 'append')
 
 
 #%%

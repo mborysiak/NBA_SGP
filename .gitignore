@@ -148,3 +148,7 @@ Data/Player_Stats.sqlite3
 Data/Stack_Predict_2025.sqlite3
 Data/Experiments.sqlite3
 Data/Simulation.sqlite3
+Scripts/catboost_info/catboost_training.json
+Scripts/catboost_info/learn/events.out.tfevents
+Scripts/catboost_info/learn_error.tsv
+Scripts/catboost_info/time_left.tsv

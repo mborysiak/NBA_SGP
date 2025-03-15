@@ -222,95 +222,52 @@ def add_proj_market_share(df):
 
 
 
+# def rolling_proj_stats(df, proj_cols):
+#     df = forward_fill(df)
+#     df = add_rolling_stats(df, ['player'], proj_cols)
+
+#     for c in proj_cols:
+#         df[f'trend_diff_{c}3v10'] = df[f'rmean3_{c}'] - df[f'rmean10_{c}']
+#         df[f'trend_chg_{c}3v10'] = df[f'trend_diff_{c}3v10'] / (df[f'rmean10_{c}']+5)
+
+#         df[f'trend_diff_{c}6v10'] = df[f'rmean3_{c}'] - df[f'rmean10_{c}']
+#         df[f'trend_chg_{c}6v10'] = df[f'trend_diff_{c}6v10'] / (df[f'rmean10_{c}']+5)
+
+#         df[f'trend_diff_{c}1v6'] = df[c] - df[f'rmean6_{c}']
+#         df[f'trend_chg_{c}1v6'] = df[f'trend_diff_{c}1v6'] / (df[f'rmean6_{c}']+5)
+
+#     return df
+
 def rolling_proj_stats(df, proj_cols):
     df = forward_fill(df)
     df = add_rolling_stats(df, ['player'], proj_cols)
-
+    
+    # Create all new columns at once using a dictionary, then join them
+    new_columns = {}
+    
     for c in proj_cols:
-        df[f'trend_diff_{c}3v10'] = df[f'rmean3_{c}'] - df[f'rmean10_{c}']
-        df[f'trend_chg_{c}3v10'] = df[f'trend_diff_{c}3v10'] / (df[f'rmean10_{c}']+5)
-
-        df[f'trend_diff_{c}6v10'] = df[f'rmean3_{c}'] - df[f'rmean10_{c}']
-        df[f'trend_chg_{c}6v10'] = df[f'trend_diff_{c}6v10'] / (df[f'rmean10_{c}']+5)
-
-        df[f'trend_diff_{c}1v6'] = df[c] - df[f'rmean6_{c}']
-        df[f'trend_chg_{c}1v6'] = df[f'trend_diff_{c}1v6'] / (df[f'rmean6_{c}']+5)
-
-    return df
-
-# def rolling_proj_stats(df, proj_cols):
-#     df = forward_fill(df)
-#     df = add_rolling_stats(df, ['player'], proj_cols)
-    
-#     # Create all new columns at once using a dictionary, then join them
-#     new_columns = {}
-    
-#     for c in proj_cols:
-#         # Calculate all values first
-#         rmean10_plus5 = df[f'rmean10_{c}'] + 5
-#         rmean6_plus5 = df[f'rmean6_{c}'] + 5
+        # Calculate all values first
+        rmean10_plus5 = df[f'rmean10_{c}'] + 5
+        rmean6_plus5 = df[f'rmean6_{c}'] + 5
         
-#         trend_diff_3v10 = df[f'rmean3_{c}'] - df[f'rmean10_{c}']
-#         trend_diff_6v10 = df[f'rmean6_{c}'] - df[f'rmean10_{c}']
-#         trend_diff_1v6 = df[c] - df[f'rmean6_{c}']
+        trend_diff_3v10 = df[f'rmean3_{c}'] - df[f'rmean10_{c}']
+        trend_diff_6v10 = df[f'rmean6_{c}'] - df[f'rmean10_{c}']
+        trend_diff_1v6 = df[c] - df[f'rmean6_{c}']
         
-#         # Store in dictionary instead of adding to DataFrame individually
-#         new_columns[f'trend_diff_{c}3v10'] = trend_diff_3v10
-#         new_columns[f'trend_chg_{c}3v10'] = trend_diff_3v10 / rmean10_plus5
+        # Store in dictionary instead of adding to DataFrame individually
+        new_columns[f'trend_diff_{c}3v10'] = trend_diff_3v10
+        new_columns[f'trend_chg_{c}3v10'] = trend_diff_3v10 / rmean10_plus5
         
-#         new_columns[f'trend_diff_{c}6v10'] = trend_diff_6v10
-#         new_columns[f'trend_chg_{c}6v10'] = trend_diff_6v10 / rmean10_plus5
+        new_columns[f'trend_diff_{c}6v10'] = trend_diff_6v10
+        new_columns[f'trend_chg_{c}6v10'] = trend_diff_6v10 / rmean10_plus5
         
-#         new_columns[f'trend_diff_{c}1v6'] = trend_diff_1v6
-#         new_columns[f'trend_chg_{c}1v6'] = trend_diff_1v6 / rmean6_plus5
+        new_columns[f'trend_diff_{c}1v6'] = trend_diff_1v6
+        new_columns[f'trend_chg_{c}1v6'] = trend_diff_1v6 / rmean6_plus5
     
-#     # Add all new columns at once to prevent fragmentation
-#     new_df = pd.concat([df, pd.DataFrame(new_columns, index=df.index)], axis=1)
+    # Add all new columns at once to prevent fragmentation
+    new_df = pd.concat([df, pd.DataFrame(new_columns, index=df.index)], axis=1)
     
-#     return new_df
-
-# def rolling_proj_stats(df, proj_cols):
-#     df = forward_fill(df)
-#     df = add_rolling_stats(df, ['player'], proj_cols)
-    
-#     # Create dictionaries to hold our computed columns
-#     diff_columns = {}
-#     chg_columns = {}
-    
-#     # Vectorized calculation for all 3v10 trends across columns
-#     for pattern, rmean_src, rmean_dest in [
-#         ('3v10', 'rmean3_', 'rmean10_'),
-#         ('6v10', 'rmean6_', 'rmean10_'),
-#         ('1v6', '', 'rmean6_')
-#     ]:
-#         # Source columns for calculations
-#         if rmean_src:
-#             src_cols = [f"{rmean_src}{c}" for c in proj_cols]
-#         else:
-#             src_cols = proj_cols.copy()  # For the 1v6 case, use raw columns
-        
-#         # Destination columns
-#         dest_cols = [f"{rmean_dest}{c}" for c in proj_cols]
-        
-#         # Calculate differences (vectorized across all columns)
-#         for i, c in enumerate(proj_cols):
-#             # Calculate difference
-#             diff_col_name = f'trend_diff_{c}{pattern}'
-#             diff_columns[diff_col_name] = df[src_cols[i]] - df[dest_cols[i]]
-            
-#             # Calculate change
-#             chg_col_name = f'trend_chg_{c}{pattern}'
-#             denominator = df[dest_cols[i]] + 5
-#             chg_columns[chg_col_name] = diff_columns[diff_col_name] / denominator
-    
-#     # Combine all new columns with the original dataframe
-#     result = pd.concat([
-#         df,
-#         pd.DataFrame(diff_columns, index=df.index),
-#         pd.DataFrame(chg_columns, index=df.index)
-#     ], axis=1)
-    
-#     return result
+    return new_df
 
 
 
@@ -606,55 +563,6 @@ def add_team_hustle_stats(df, team_or_opp):
     return df
 
 
-
-# def remove_low_corrs(df, threshold=0.05):
-
-#     orig_cols = df.shape[1]
-#     obj_cols = list(df.dtypes[df.dtypes=='object'].index)
-#     corrs = pd.DataFrame(np.corrcoef(df.dropna().drop(obj_cols, axis=1).values, rowvar=False), 
-#                             columns=[c for c in df.columns if c not in obj_cols],
-#                             index=[c for c in df.columns if c not in obj_cols])
-    
-#     corrs = corrs[[y for y in corrs.columns if 'y_act' in y]]
-#     corrs = corrs[~corrs.index.str.contains('y_act')]
-#     good_corrs = list(corrs[abs(corrs) >= threshold].dropna(how='all').index)
-
-#     obj_cols.extend(good_corrs)
-#     obj_cols.extend(corrs.columns)
-#     print(f'Kept {len(obj_cols)}/{orig_cols} columns')
-
-#     return df[obj_cols]
-
-
-def remove_low_corrs(data, corr_cut=60, collinear_cut=0.95):
-
-    from skmodel import SciKitModel
-    df = data.copy().dropna(axis=0).reset_index(drop=True)
-    print(df.shape)
-    orig_cols = df.shape[1]
-    obj_cols = list(df.dtypes[df.dtypes=='object'].index)
-    obj_cols.extend([c for c in df.columns if 'y_act_' in c])
-    obj_cols = [c for c in obj_cols if c in df.columns]
-
-    best_cols = []
-    for y_lbl in [c for c in df.columns if 'y_act_' in c]:
-
-        skm = SciKitModel(df, model_obj='reg')
-        X, y = skm.Xy_split(y_lbl, to_drop = obj_cols)
-        corr_collin = skm.piece('corr_collinear')[-1]
-        corr_collin.set_params(**{'corr_percentile': corr_cut, 'collinear_threshold': collinear_cut})
-        X = corr_collin.fit_transform(X, y)
-
-        best_cols.extend([c for c in X.columns if c not in best_cols and 'y_act' not in c])
-    
-    best_cols = list(set(best_cols))
-    obj_cols = list(set(obj_cols))
-    obj_cols.extend(best_cols)
-    print(f'Kept {len(obj_cols)}/{orig_cols} columns')
-
-    return data[obj_cols]
-
-
 def available_stats(df, missing):
 
     avail_columns = [
@@ -697,26 +605,18 @@ def add_dk_team_lines(df):
     return df
 
 
-# def get_columns(df, train_date, threshold=0.05):
-#     try:
-#         cols = dm.read(f"SELECT * FROM Model_Data_{train_date}", 'Model_Features').columns.tolist()
-#         cols.extend(dm.read(f"SELECT * FROM Model_Data_{train_date}v2", 'Model_Features').columns.tolist())
-#         df = df[cols]
-#     except:
-#         df = remove_low_corrs(df, threshold=threshold)
-
-#     return df
-
-def get_columns(df, train_date):
+def get_columns(train_date):
     try:
         cols = dm.read(f"SELECT * FROM Model_Data_{train_date}", 'Model_Features').columns.tolist()
-        try: cols.extend(dm.read(f"SELECT * FROM Model_Data_{train_date}v2", 'Model_Features').columns.tolist())
-        except: pass
-        df = df[cols]
-    except:
-        df = remove_low_corrs(df)
+        try: 
+            cols.extend(dm.read(f"SELECT * FROM Model_Data_{train_date}v2", 'Model_Features').columns.tolist())
+        except: 
+            pass
+        
+        return cols
 
-    return df
+    except:
+        return None
 
 def trunc_normal(mean_val, sdev, min_sc, max_sc, num_samples=500):
 
@@ -965,10 +865,214 @@ def fill_vegas_stats(df, player_vegas_stats):
     return df
 
 
+def pull_odds(metric, game_dates):
+
+    odds = dm.read(f'''SELECT player, game_date, value
+                       FROM Draftkings_Odds 
+                       WHERE stat_type='{metric}'
+                             AND over_under='over'
+                             AND decimal_odds < 2.5
+                             AND decimal_odds > 1.5
+                             AND game_date >= '{game_dates[-1]}'
+                    ''', 'Player_Stats')
+
+    return odds
+
+def create_value_columns(df, metric):
+    """Vectorized version of value column creation"""
+    # Convert value column to float once
+    try:
+        df['value'] = df['value'].astype(float)
+    except:
+        pass
+    
+    # Get all relevant columns in one go
+    metric_cols = [c for c in df.columns if metric in c and 'y_act' not in c]
+    
+    # Convert all relevant columns to float at once
+    try:
+        df[metric_cols] = df[metric_cols].astype(float)
+        
+        # Create all new columns at once using DataFrame operations
+        vs_value_df = df[metric_cols].subtract(df['value'], axis=0)
+        over_value_df = df[metric_cols].div(df['value'], axis=0)
+        
+        # Rename the new columns
+        vs_value_df.columns = [f"{col}_vs_value" for col in vs_value_df.columns]
+        over_value_df.columns = [f"{col}_over_value" for col in over_value_df.columns]
+        
+        # Concatenate all at once
+        df = pd.concat([df, vs_value_df, over_value_df], axis=1)
+    except:
+        pass
+    
+    return df
+
+def remove_low_counts(df):
+    cnts = df.groupby('game_date').agg({'player': 'count'})
+    cnts = cnts[cnts.player > 5].reset_index().drop('player', axis=1)
+    df = pd.merge(df, cnts, on='game_date')
+    return df
+
+def get_over_under_class(df, metric, game_dates):
+    
+    odds = pull_odds(metric, game_dates)
+    df = pd.merge(df, odds, on=['player', 'game_date'])
+    df = df.sort_values(by='game_date').reset_index(drop=True)
+
+    df[f'y_act_{metric}_over'] = np.where(df[f'y_act_{metric}'] >= df.value, 1, 0)
+    df = remove_low_counts(df)
+
+    return df
+
+
+def filter_and_sort_features(feature_cols, importance_scores, n_features=500):
+ 
+    # Sort features by importance and filter out value columns
+    sorted_features = [feat for feat, _ in sorted(zip(feature_cols, importance_scores), 
+                                                key=lambda x: x[1], 
+                                                reverse=True)
+                      if 'vs_value' not in feat and 'over_value' not in feat]
+    return sorted_features[:n_features]
+
+def select_features_for_category(df, target_col, n_features=500, is_classification=False):
+    """
+    Select features using multiple methods and return top N from each
+    """
+    from sklearn.feature_selection import mutual_info_classif, mutual_info_regression, SelectKBest, f_classif, f_regression
+    from lightgbm import LGBMClassifier, LGBMRegressor
+    from sklearn.preprocessing import StandardScaler
+    from xgboost import XGBClassifier, XGBRegressor
+    
+    # Get all numeric feature columns for training
+    feature_cols = df.select_dtypes(include=['float64', 'int64']).columns
+    feature_cols = [c for c in feature_cols if 'y_act' not in c]
+    X = df[feature_cols]
+    y = df[target_col]
+    
+    # Standardize features
+    X_scaled = StandardScaler().fit_transform(X)
+    X_scaled = pd.DataFrame(X_scaled, columns=feature_cols)
+    
+    selected_features = []
+    
+    # MI Selection
+    print('MI Selection')
+    if is_classification:
+        mi_scores = mutual_info_classif(X_scaled, y, random_state=42)
+    else:
+        mi_scores = mutual_info_regression(X_scaled, y, random_state=42)
+    selected_features.extend(filter_and_sort_features(feature_cols, mi_scores, n_features))
+    
+    # KBest Selection
+    print('KBest Selection')
+    if is_classification:
+        kbest = SelectKBest(score_func=f_classif, k=len(feature_cols))
+    else:
+        kbest = SelectKBest(score_func=f_regression, k=len(feature_cols))
+    kbest.fit(X_scaled, y)
+    selected_features.extend(filter_and_sort_features(feature_cols, kbest.scores_, n_features))
+    
+    # LightGBM Selection
+    print('LightGBM Selection')
+    if is_classification:
+        model = LGBMClassifier(n_jobs=-1, random_state=42)
+    else:
+        model = LGBMRegressor(n_jobs=-1, random_state=42)
+    model.fit(X, y)
+    selected_features.extend(filter_and_sort_features(feature_cols, model.feature_importances_, n_features))
+    
+    # XGBoost Selection
+    print('XGBoost Selection')
+    if is_classification:
+        xgb_model = XGBClassifier(n_jobs=-1, random_state=42)
+    else:
+        xgb_model = XGBRegressor(n_jobs=-1, random_state=42)
+    xgb_model.fit(X, y)
+    selected_features.extend(filter_and_sort_features(feature_cols, xgb_model.feature_importances_, n_features))
+    
+    return selected_features
+
+
+def get_reg_class_features(df, game_dates):
+    all_reg_features = []
+    all_class_features = []
+    for metric in ['points', 'rebounds', 'assists', 'three_pointers']:
+        df_class = get_over_under_class(df.copy(), metric, game_dates)
+        df_class = create_value_columns(df_class, metric)
+        df_class = df_class.dropna(axis=0).reset_index(drop=True)
+
+        # Regression features
+        print(f'\n{metric} regression features')
+        reg_features = select_features_for_category(
+                    df.dropna(axis=0).reset_index(drop=True), 
+                    f'y_act_{metric}', 
+                    n_features=1000,
+                    is_classification=False
+                )
+        
+        print(f'\n{metric} classification features')
+        class_features = select_features_for_category(
+                    df_class, 
+                    f'y_act_{metric}_over', 
+                    n_features=1000,
+                    is_classification=True
+                )
+        all_reg_features.extend(reg_features)
+        all_class_features.extend(class_features)
+
+    return all_reg_features, all_class_features
+
+def reconcile_features(all_features, min_count=5):
+    """
+    Reconcile features based on how many times they were selected
+    """
+    all_features = pd.Series(all_features).value_counts().sort_values(ascending=False)
+    
+    for i in range(1,11):
+        print('Num features for top', i, 'features:', all_features[all_features >= i].shape[0])
+
+    all_features = all_features[all_features >= min_count]
+    print(all_features.head(50))
+    final_features = all_features.index.tolist()
+    
+    return final_features
+
+def get_final_features(all_reg_features, all_class_features, class_min=6, reg_min=7, remaining_min=8):
+
+    final_class_features = reconcile_features(
+        all_class_features,
+        min_count=class_min
+    )
+
+    final_reg_features = reconcile_features(
+        all_reg_features,
+        min_count=7
+    )
+
+    print('class features:', len(final_class_features))
+    print('reg features:', len(final_reg_features))
+    final_features = final_class_features + final_reg_features
+    remain_features = [c for c in all_class_features+all_reg_features if c not in final_features]
+
+    final_remaining_features = reconcile_features(
+        remain_features,
+        min_count=8)
+
+    final_features = final_features + final_remaining_features
+    final_features = list(set(final_features))
+
+    print('final features:', len(final_features))
+
+    other_cols = ['player', 'game_date', 'team', 'opponent']
+    other_cols.extend([c for c in df.columns if 'y_act' in c])
+    other_cols.extend(final_features)
+
+    return other_cols
+
 #%%
 
-# train_date = '2025-01-10'
-train_date = '2025-02-01'
+train_date = '2025-03-13'
 max_date = dm.read("SELECT max(game_date) FROM FantasyData", 'Player_Stats').values[0][0]
 
 df = fantasy_data()
@@ -1036,14 +1140,27 @@ print('after team lines', df.shape)
 
 df = add_y_act(df, box_score)
 df = df.dropna(axis=0, subset=[c for c in df.columns if 'y_act' not in c]).reset_index(drop=True)
-print(df.shape)
-
 train_date = train_date.replace('-', '')
-df = get_columns(df, train_date)
-print(df.game_date.max())
-print(df.shape)
 
 #%%
+print(df.shape)
+print(df.game_date.max())
+
+final_cols = get_columns(train_date)
+if final_cols is None:
+    all_reg_features, all_class_features = get_reg_class_features(df, game_dates)
+    final_cols = get_final_features(all_reg_features, all_class_features, class_min=6, reg_min=7, remaining_min=8)
+
+print('Number of features:', len(final_cols))
+
+#%%
+
+# final_cols = get_final_features(all_reg_features, all_class_features, class_min=6, reg_min=7, remaining_min=8)
+
+#%%
+
+df = df[final_cols]
+print(df.shape)
 
 dm.write_to_db(df.iloc[:,:2000], 'Model_Features', f'Model_Data_{train_date}', if_exist='replace')
 if df.shape[1] > 2000:
@@ -1052,73 +1169,8 @@ if df.shape[1] > 2000:
 
 #%%
 
-def add_y_act(df, bs, metric):
-
-    y_act = bs[['player', 'game_date', metric]].copy()
-    y_act.columns = ['y_act_' + c if c not in ('player', 'game_date') else c for c in y_act.columns]
-    df = pd.merge(df, y_act, on=['player', 'game_date'], how='left')
-
-    return df
 
 
-def pull_odds(metric, game_dates):
-
-    odds = dm.read(f'''SELECT player, game_date, value
-                       FROM Draftkings_Odds 
-                       WHERE stat_type='{metric}'
-                             AND over_under='over'
-                             AND decimal_odds < 2.5
-                             AND decimal_odds > 1.5
-                             AND game_date >= '{game_dates[-1]}'
-                    ''', 'Player_Stats')
-
-    return odds
-
-def create_value_columns(df, metric):
-    try: df.value = df.value.astype(float)
-    except: pass
-
-    for c in df.columns:
-        if metric in c and 'y_act' not in c:
-            try: 
-                df[c] = df[c].astype(float)
-                df = pd.concat([df, pd.Series(df[c]-df.value, name=f'{c}_vs_value')], axis=1)
-                df = pd.concat([df, pd.Series(df[c]/df.value, name=f'{c}_over_value')], axis=1)
-            except: 
-                pass
-           
-
-    return df
-
-def remove_low_counts(df):
-    cnts = df.groupby('game_date').agg({'player': 'count'})
-    cnts = cnts[cnts.player > 5].reset_index().drop('player', axis=1)
-    df = pd.merge(df, cnts, on='game_date')
-    return df
-
-def get_over_under_class(df, metric, game_dates):
-    
-    odds = pull_odds(metric, game_dates)
-    df = pd.merge(df, odds, on=['player', 'game_date'])
-    df = df.sort_values(by='game_date').reset_index(drop=True)
-
-    df[f'y_act_{metric}_over'] = np.where(df[f'y_act_{metric}'] >= df.value, 1, 0)
-    df = remove_low_counts(df)
-
-    return df
-
-data = df.copy()
-metric = 'rebounds'
-data = add_y_act(data, box_score, metric)
-
-data = get_over_under_class(data, metric, game_dates)
-data = remove_low_corrs(data, metric)
-data = create_value_columns(data, metric)
-data = data.dropna(axis=0, subset=[c for c in data.columns if 'y_act' not in c]).reset_index(drop=True)
-
-dm.write_to_db(data.iloc[:,:2000], 'Model_Features', f'Test_Model_Data_{train_date}', if_exist='replace')
-if data.shape[1] > 2000:
-    dm.write_to_db(data.iloc[:,2000:], 'Model_Features', f'Test_Model_Data_{train_date}v2', if_exist='replace')
 
 # %%
 

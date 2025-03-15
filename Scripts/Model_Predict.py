@@ -268,23 +268,23 @@ def load_all_stack_pred(model_output_path, metric):
 
 def fit_and_predict(m_label, m, df_predict, X, y, proba):
 
-    try:
-        cols = m.named_steps['random_select'].columns
-        cols = [c for c in cols if c in X.columns]
-        X = X[cols]
-        X_predict = df_predict[cols]
-        m.steps = [(name, trans) for (name, trans) in m.steps if name != "random_sample"]
-    except:
-        X_predict = df_predict[X.columns]
+    # try:
+    cols = m.named_steps['random_sample'].columns
+    cols = [c for c in cols if c in X.columns]
+    X = X[cols]
+    X_predict = df_predict[cols]
+    m.steps = [(name, trans) for (name, trans) in m.steps if name != "random_sample"]
+    # except:
+    #     X_predict = df_predict[X.columns]
         
-    try:
-        m.fit(X,y)
+    # try:
+    m.fit(X,y)
 
-        if proba: cur_predict = m.predict_proba(X_predict)[:,1]
-        else: cur_predict = m.predict(X_predict)
+    if proba: cur_predict = m.predict_proba(X_predict)[:,1]
+    else: cur_predict = m.predict(X_predict)
     
-    except:
-        cur_predict = []
+    # except:
+    #     cur_predict = []
 
     cur_predict = pd.DataFrame(cur_predict, columns=['pred'])
     cur_predict['model'] = m_label
@@ -360,6 +360,7 @@ def stack_predictions(X_predict, best_models, final_models, model_obj='reg'):
 
 def best_average_models(scores, final_models, y_stack, stack_val_pred, predictions, model_obj, min_include = 3, wts=None):
     
+    if model_obj == 'quantile': min_include -= 1
     skm, _, _ = get_skm(df_train, model_obj=model_obj, to_drop=[])
     
     n_scores = []
@@ -534,12 +535,33 @@ def pull_odds(metric, parlay=False):
     return odds
 
 def create_value_columns(df, metric):
-
-    for c in df.columns:
-        if metric in c:
-            df[c + '_vs_value'] = df[c] - df.value
-            df[c + '_over_value'] = df[c] / df.value
-
+    """Vectorized version of value column creation"""
+    # Convert value column to float once
+    try:
+        df['value'] = df['value'].astype(float)
+    except:
+        pass
+    
+    # Get all relevant columns in one go
+    metric_cols = [c for c in df.columns if metric in c and 'y_act' not in c]
+    
+    # Convert all relevant columns to float at once
+    try:
+        df[metric_cols] = df[metric_cols].astype(float)
+        
+        # Create all new columns at once using DataFrame operations
+        vs_value_df = df[metric_cols].subtract(df['value'], axis=0)
+        over_value_df = df[metric_cols].div(df['value'], axis=0)
+        
+        # Rename the new columns
+        vs_value_df.columns = [f"{col}_vs_value" for col in vs_value_df.columns]
+        over_value_df.columns = [f"{col}_over_value" for col in over_value_df.columns]
+        
+        # Concatenate all at once
+        df = pd.concat([df, vs_value_df, over_value_df], axis=1)
+    except:
+        pass
+    
     return df
 
 def get_over_under_class(df, metric, run_params, model_obj='class'):
@@ -952,8 +974,9 @@ def run_stack_models(fname, final_m, i, model_obj, alpha, X_stack, y_stack, run_
 def get_func_params(model_obj, alpha):
 
     model_list = {
-        'reg': ['rf', 'gbm', 'gbmh', 'mlp', 'cb', 'huber', 'xgb', 'lgbm', 'knn', 'ridge', 'lasso', 'bridge', 'enet', 'cb_p', 'cb_t', 'lgbm_p', 'lgbm_t', 'xgb_p', 'xgb_t'],
-        'class': ['rf_c', 'gbm_c', 'gbmh_c', 'xgb_c','lgbm_c', 'knn_c', 'lr_c', 'mlp_c', 'cb_c'],
+        'reg': ['rf', 'gbm', 'gbmh', 'mlp', 'cb', 'huber', 'xgb', 'lgbm', 'knn', 'ridge', 'lasso', 
+                'bridge', 'enet', 'cb_p', 'cb_t', 'lgbm_p', 'lgbm_t', 'xgb_p', 'xgb_t', 'et'],
+        'class': ['rf_c', 'gbm_c', 'gbmh_c', 'xgb_c','lgbm_c', 'knn_c', 'lr_c', 'mlp_c', 'cb_c', 'et_c'],
         'quantile': ['qr_q', 'gbm_q', 'lgbm_q', 'gbmh_q', 'rf_q', 'cb_q']#, 'knn_q']
     }
 
@@ -1195,13 +1218,13 @@ run_params = {
     
     # # set year and week to analyze
 
-    # 'last_train_date_orig': '2024-12-14',
-    # 'train_date_orig': '2025-01-10',
-    # 'test_time_split_orig': '2025-03-08',
+    'last_train_date_orig': '2025-02-01',
+    'train_date_orig': '2025-03-13',
+    'test_time_split_orig': '2025-03-13',
 
-    'last_train_date_orig': '2025-01-10',
-    'train_date_orig': '2025-02-01',
-    'test_time_split_orig': dt.date.today().strftime('%Y-%m-%d'),
+    # 'last_train_date_orig': '2025-01-10',
+    # 'train_date_orig': '2025-02-01',
+    # 'test_time_split_orig': dt.date.today().strftime('%Y-%m-%d'),
     
     'db_stack_predict_last': 'Stack_Predict_2025',
 
@@ -1217,7 +1240,7 @@ run_params = {
     'num_k_folds': 3,
     'show_plot': True,
     'print_coef': True,
-    'min_include': 2,
+    'min_include': 3,
 
     # set version and iterations
     'pred_vers': 'mse1_brier1',

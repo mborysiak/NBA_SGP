@@ -42,14 +42,14 @@ verbosity=50
 run_params = {
     
     # set year and week to analyze
-    'cv_time_input_back_days': 30,
-    'last_train_time_split': '2025-01-10',
-    'train_time_split': '2025-02-01',
+    'cv_time_input_back_days': 40,
+    'last_train_time_split': '2025-02-01',
+    'train_time_split': '2025-03-13',
     
     'metrics': [
                  'points', 'assists', 'rebounds', 'three_pointers', 
-                 'points_assists', 'points_rebounds', 'points_rebounds_assists', 'assists_rebounds', 
-                 #'steals_blocks','blocks', 'steals', 'total_points', 'spread'  
+                 'points_assists', 'points_rebounds', 'assists_rebounds', 
+                # 'points_rebounds_assists', 'steals_blocks','blocks', 'steals', 'total_points', 'spread'  
                 ],
     'n_iters': 15,
     'n_splits': 4,
@@ -202,16 +202,33 @@ def pull_odds(metric, run_params):
     return odds
 
 def create_value_columns(df, metric):
-    try: df.value = df.value.astype(float)
-    except: pass
-
-    for c in df.columns:
-        if metric in c:
-            try: df[c] = df[c].astype(float)
-            except: pass
-            df = pd.concat([df, pd.Series(df[c]-df.value, name=f'{c}_vs_value')], axis=1)
-            df = pd.concat([df, pd.Series(df[c]/df.value, name=f'{c}_over_value')], axis=1)
-
+    """Vectorized version of value column creation"""
+    # Convert value column to float once
+    try:
+        df['value'] = df['value'].astype(float)
+    except:
+        pass
+    
+    # Get all relevant columns in one go
+    metric_cols = [c for c in df.columns if metric in c and 'y_act' not in c]
+    
+    # Convert all relevant columns to float at once
+    try:
+        df[metric_cols] = df[metric_cols].astype(float)
+        
+        # Create all new columns at once using DataFrame operations
+        vs_value_df = df[metric_cols].subtract(df['value'], axis=0)
+        over_value_df = df[metric_cols].div(df['value'], axis=0)
+        
+        # Rename the new columns
+        vs_value_df.columns = [f"{col}_vs_value" for col in vs_value_df.columns]
+        over_value_df.columns = [f"{col}_over_value" for col in over_value_df.columns]
+        
+        # Concatenate all at once
+        df = pd.concat([df, vs_value_df, over_value_df], axis=1)
+    except:
+        pass
+    
     return df
 
 def remove_low_counts(df):
@@ -305,7 +322,7 @@ def get_optuna_study(label, vers, run_params):
 
 def reg_params(df_train, min_samples, run_params):
     model_list = ['knn','mlp', 'bridge', 'ridge', 'svr', 'lasso', 'enet', 'lgbm', 'xgb', 'gbmh', 'gbm', 'cb', 'rf', 
-                  'cb_t', 'cb_p', 'lgbm_t', 'lgbm_p', 'xgb_t', 'xgb_p']
+                  'cb_t', 'cb_p', 'lgbm_t', 'lgbm_p', 'xgb_t', 'xgb_p', 'et']
     func_params_reg = []
     metric = run_params['cur_metric']
     for i, m  in enumerate(model_list):
@@ -315,7 +332,7 @@ def reg_params(df_train, min_samples, run_params):
     return func_params_reg
 
 def class_params(df_train_class, min_samples, run_params, is_parlay=False):
-    model_list = ['lr_c', 'knn_c', 'lgbm_c', 'xgb_c', 'mlp_c', 'gbmh_c', 'gbm_c', 'cb_c', 'rf_c'  ]
+    model_list = ['lr_c', 'knn_c', 'lgbm_c', 'xgb_c', 'mlp_c', 'gbmh_c', 'gbm_c', 'cb_c', 'rf_c', 'et_c']
     func_params_c = []
     metric = run_params['cur_metric']
     for i, m  in enumerate(model_list):
@@ -369,7 +386,7 @@ def get_full_pipe(skm, m, X, alpha=None, stack_model=False, min_samples=10, baye
 
     elif skm.model_obj == 'reg':
         pipe = skm.model_pipe([
-                               skm.piece('feature_drop'),
+                            #   skm.piece('feature_drop'),
                                 skm.piece('random_sample'),
                                 skm.piece('std_scale'), 
                                 skm.piece('select_perc'),
@@ -383,7 +400,7 @@ def get_full_pipe(skm, m, X, alpha=None, stack_model=False, min_samples=10, baye
 
     elif skm.model_obj == 'class':
         pipe = skm.model_pipe([
-                              skm.piece('feature_drop'),
+                           #   skm.piece('feature_drop'),
                                skm.piece('random_sample'),
                                skm.piece('std_scale'), 
                                skm.piece('select_perc_c'),
@@ -396,7 +413,7 @@ def get_full_pipe(skm, m, X, alpha=None, stack_model=False, min_samples=10, baye
     
     elif skm.model_obj == 'quantile':
         pipe = skm.model_pipe([
-                               skm.piece('feature_drop'),
+                           #    skm.piece('feature_drop'),
                                 skm.piece('random_sample'),
                                 skm.piece('std_scale'), 
                                 skm.piece('k_best'), 
@@ -410,7 +427,7 @@ def get_full_pipe(skm, m, X, alpha=None, stack_model=False, min_samples=10, baye
 
     # get the params for the current pipe and adjust if needed
     params = skm.default_params(pipe, bayes_rand, min_samples=min_samples)
-    params['feature_drop__drop_cols'] = ['cat', [[c for c in X.columns if 'ev' in c], []]]
+  #  params['feature_drop__drop_cols'] = ['cat', [[c for c in X.columns if 'ev' in c], []]]
 
     if m in ('gbm', 'gbm_c', 'gbm_q'):
         params[f'{m}__n_estimators'] = ['int', 20, 50]
@@ -578,20 +595,14 @@ for metric in run_params['metrics']:
 
     run_params['parlay'] = False
     df_train_class, df_predict_class = get_over_under_class(df, metric, run_params, model_obj='class')
-    # df_train_diff, df_predict_diff = get_over_under_class(df, metric, run_params, model_obj='reg')
-
-    # run_params['parlay'] = True
-    # df_train_parlay, df_predict_parlay = get_over_under_class(df, metric, run_params, model_obj='class')
-    # df_train_diff, df_predict_diff = get_over_under_class(df, metric, run_params, model_obj='reg')
 
     func_params = []
     func_params.extend(quant_params(df_train, [0.35, 0.5, 0.65], min_samples, run_params))
     func_params.extend(reg_params(df_train, min_samples, run_params))
     func_params.extend(class_params(df_train_class, int(min_samples/10), run_params, is_parlay=False))
-    # func_params.extend(class_params(df_train_parlay, int(min_samples/10), run_params, is_parlay=True))
     
     # run all models in parallel
-    results = Parallel(n_jobs=16, verbose=verbosity)(
+    results = Parallel(n_jobs=24, verbose=verbosity)(
                     delayed(get_model_output)
                     (m, label, df, model_obj, run_params, i, min_samples, alpha, n_iter) \
                         for m, label, df, model_obj, i, min_samples, alpha, n_iter in func_params

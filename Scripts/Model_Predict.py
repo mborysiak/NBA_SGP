@@ -266,26 +266,14 @@ def load_all_stack_pred(model_output_path, metric):
 
     return X_stack, X_stack_class, y_stack, y_stack_class, models_reg, models_class, models_quant
 
-def fit_and_predict(m_label, m, df_predict, X, y, proba):
+def fit_and_predict(m_label, m, X_predict, X, y, proba):
 
-    # try:
-    cols = m.named_steps['random_sample'].columns
-    cols = [c for c in cols if c in X.columns]
-    X = X[cols]
-    X_predict = df_predict[cols]
-    m.steps = [(name, trans) for (name, trans) in m.steps if name != "random_sample"]
-    # except:
-    #     X_predict = df_predict[X.columns]
-        
     # try:
     m.fit(X,y)
 
     if proba: cur_predict = m.predict_proba(X_predict)[:,1]
     else: cur_predict = m.predict(X_predict)
     
-    # except:
-    #     cur_predict = []
-
     cur_predict = pd.DataFrame(cur_predict, columns=['pred'])
     cur_predict['model'] = m_label
 
@@ -1162,7 +1150,7 @@ def get_all_past_results(run_params):
     attach_cols.extend([c for c in attach_pts.columns if 'y_act' in c])
     attach_pts = attach_pts[attach_cols]
     attach_pts.columns = [c.replace('y_act_', '') for c in attach_pts.columns]
-    attach_pts = pd.melt(attach_pts, id_vars=['player', 'game_date'], var_name=['metric'], value_name='y_act_fill')
+    attach_pts = pd.melt(attach_pts, id_vars=['player', 'game_date'], var_name='metric', value_name='y_act_fill')
     attach_pts = attach_pts[attach_pts.metric!='points_assists_rebounds']
     return attach_pts
 
@@ -1218,13 +1206,13 @@ run_params = {
     
     # # set year and week to analyze
 
-    'last_train_date_orig': '2025-02-01',
-    'train_date_orig': '2025-03-13',
-    'test_time_split_orig': '2025-03-13',
+    # 'last_train_date_orig': '2025-02-01',
+    # 'train_date_orig': '2025-03-13',
+    # 'test_time_split_orig': '2025-03-13',
 
-    # 'last_train_date_orig': '2025-01-10',
-    # 'train_date_orig': '2025-02-01',
-    # 'test_time_split_orig': dt.date.today().strftime('%Y-%m-%d'),
+    'last_train_date_orig': '2025-03-13',
+    'train_date_orig': '2025-10-23',
+    'test_time_split_orig':  dt.date.today().strftime('%Y-%m-%d'),
     
     'db_stack_predict_last': 'Stack_Predict_2025',
 
@@ -1244,12 +1232,13 @@ run_params = {
 
     # set version and iterations
     'pred_vers': 'mse1_brier1',
-    #  'stack_model': 'random_full_stack_ind_cats',
+    # 'stack_model': 'random_full_stack_ind_cats',
     # 'stack_model_class': 'random_full_stack_ind_cats',
-    # 'stack_model': 'random_kbest',
-    # 'stack_model_class': 'random_kbest',
-    'stack_model': 'random_full_stack',
-    'stack_model_class': 'random_full_stack',
+    # 'stack_model': 'random_full_stack',
+    # 'stack_model_class': 'random_full_stack',
+    'stack_model': 'random_kbest',
+    'stack_model_class': 'random_kbest',
+ 
    
     'parlay': False,
 
@@ -1565,14 +1554,14 @@ def preprocess_X(df, wt_col, model, cv_time_input=None):
         X['decimal_odds_twomax'] = X.decimal_odds
         X.loc[X.decimal_odds_twomax > 2, 'decimal_odds_twomax'] = 2-(1/X.loc[X.decimal_odds_twomax > 2, 'decimal_odds_twomax'])
 
-    if model != 'cb_c':
-        X = pd.concat([
-                    X, 
-                    pd.get_dummies(df.metric), 
-                    pd.get_dummies(df.day_of_week, prefix='day'),
-                    pd.get_dummies(df.month, prefix='month'),
-                    pd.get_dummies(df.train_date, prefix='train_date'),
-                    ], axis=1)
+    # if model != 'cb_c':
+    X = pd.concat([
+                X, 
+                pd.get_dummies(df.metric), 
+                pd.get_dummies(df.day_of_week, prefix='day'),
+                pd.get_dummies(df.month, prefix='month'),
+                pd.get_dummies(df.train_date, prefix='train_date'),
+                ], axis=1)
     
     if cv_time_input is not None: 
         X = pd.concat([df[['player','team', 'game_date']], X], axis=1)
@@ -1782,8 +1771,10 @@ def get_optuna_study_stack(save_name, game_date, last_game_date):
 i=20
 test_date = run_params['test_time_split']
 ens_vers = run_params['class_ens_vers']
+ens_vers_cut = '_'.join(ens_vers.split('_')[:5])+'%'
 
-query_cuts_df = dm.read(f"SELECT * FROM Best_Choices WHERE ens_vers='{run_params['class_ens_vers']}'", 'Simulation')
+ens_vers_short = run_params['class_ens_vers'].split('_matt')[0]
+query_cuts_df = dm.read(f"SELECT * FROM Best_Choices WHERE ens_vers='{ens_vers_short}'", 'Simulation')
 query_cuts_df.date_run = pd.to_datetime(query_cuts_df.date_run)
 query_cuts_df = query_cuts_df[query_cuts_df.date_run==query_cuts_df.date_run.max()].reset_index(drop=True)
 
@@ -1822,7 +1813,7 @@ for cut_name, cut_dict in query_cuts.items():
                 AND value {val_less}
                 AND decimal_odds {decimal_cut_greater}
                 AND decimal_odds {decimal_cut_less}
-                AND ens_vers = '{ens_vers}'
+                AND ens_vers LIKE '{ens_vers_cut}'
                 AND metric IN ('points', 'assists', 'rebounds', 'three_pointers',
                                'assists_rebounds', 'points_assists', 'points_rebounds')
             ORDER BY game_date ASC

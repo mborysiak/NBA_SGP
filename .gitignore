@@ -9,6 +9,7 @@ __pycache__/
 Scripts/optuna*
 catboost*
 *catboost_info*
+*venv*
 
 # Distribution / packaging
 .Python

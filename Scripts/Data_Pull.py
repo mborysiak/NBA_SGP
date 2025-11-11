@@ -613,42 +613,372 @@ class NBAStats:
 
         return df
 
-    def player_team_df(self, ep_data, i_select=0):
+    def player_team_df(self, ep_data, i_select=0, is_tracking=False, 
+                       is_advanced=False, is_hustle=False, is_usage=False, is_defensive=False):
         player_data = ep_data.get_data_frames()[0+i_select]
         team_data = ep_data.get_data_frames()[1+i_select]
 
-        player_data['game_date'] = self.game_date
-        team_data['game_date'] = self.game_date
+        if is_tracking:
+            player_data = self.player_tracking_rename(player_data)
+            team_data = self.team_tracking_rename(team_data)
+        elif is_advanced:
+            player_data = self.player_advanced_rename(player_data)
+            team_data = self.team_advanced_rename(team_data)
+        elif is_hustle:
+            player_data = self.player_hustle_rename(player_data)
+            team_data = self.team_hustle_rename(team_data)
+        elif is_usage:
+            player_data = self.player_usage_rename(player_data)
+            team_data = self.team_usage_rename(team_data)
+        elif is_defensive:
+            player_data = self.player_defensive_rename(player_data)
+            team_data = None
 
+        player_data['game_date'] = self.game_date
         player_data = self.update_team_names(player_data)
-        team_data = self.update_team_names(team_data)
+
+        if team_data is not None:
+            team_data['game_date'] = self.game_date
+            team_data = self.update_team_names(team_data)
 
         return player_data, team_data
 
     def get_box_score(self, game_id):
-        box_score = self.ep.boxscoretraditionalv2.BoxScoreTraditionalV2(game_id=game_id)
+        box_score = self.ep.boxscoretraditionalv2.BoxScoreTraditionalV2(game_id=game_id, timeout=5)
         box_score_player, box_score_team = self.player_team_df(box_score)
         return box_score_player, box_score_team
 
     def get_tracking_data(self, game_id):
-        tracking = self.ep.boxscoreplayertrackv2.BoxScorePlayerTrackV2(game_id=game_id)
-        tracking_player, tracking_team = self.player_team_df(tracking)
+        tracking = self.ep.boxscoreplayertrackv3.BoxScorePlayerTrackV3(game_id=game_id, timeout=5)
+        tracking_player, tracking_team = self.player_team_df(tracking, is_tracking=True)
         return tracking_player, tracking_team
 
     def get_advanced_stats(self, game_id):
-        adv_box_score = self.ep.boxscoreadvancedv2.BoxScoreAdvancedV2(game_id=game_id)
-        adv_box_score_player, adv_box_score_team = self.player_team_df(adv_box_score)
+        adv_box_score = self.ep.boxscoreadvancedv3.BoxScoreAdvancedV3(game_id=game_id, timeout=5)
+        adv_box_score_player, adv_box_score_team = self.player_team_df(adv_box_score, is_advanced=True)
         return adv_box_score_player, adv_box_score_team
     
     def get_hustle_stats(self, game_id):
-        hustle = self.ep.hustlestatsboxscore.HustleStatsBoxScore(game_id=game_id)
-        hustle_player, hustle_team = self.player_team_df(hustle, i_select=1)
+        hustle = self.ep.boxscorehustlev2.BoxScoreHustleV2(game_id=game_id, timeout=5)
+        hustle_player, hustle_team = self.player_team_df(hustle, is_hustle=True)
         return hustle_player, hustle_team
     
     def get_usage_stats(self, game_id):
-        usage = self.ep.boxscoreusagev2.BoxScoreUsageV2(game_id=game_id)
-        usage_player, usage_team = self.player_team_df(usage)
+        usage = self.ep.boxscoreusagev3.BoxScoreUsageV3(game_id=game_id, timeout=5)
+        usage_player, usage_team = self.player_team_df(usage, is_usage=True)
         return usage_player, usage_team
+    
+    def get_defensive_stats(self, game_id):
+        defensive = self.ep.boxscoredefensivev2.BoxScoreDefensiveV2(game_id=game_id, timeout=5)
+        defensive_player, defensive_team = self.player_team_df(defensive, is_defensive=True)
+        return defensive_player, defensive_team
+
+    @staticmethod
+    def player_tracking_rename(df):
+        col_rename = {
+            'gameId': 'GAME_ID',
+            'teamId': 'TEAM_ID',
+            'teamTricode': 'TEAM_ABBREVIATION',
+            'firstName': 'PLAYER_NAME',
+            'teamCity': 'TEAM_CITY', 
+            'personId': 'PLAYER_ID',
+            'position': 'START_POSITION',
+            'comment': 'COMMENT',
+            'minutes': 'MIN',
+            'speed': 'SPD',
+            'distance': 'DIST',
+            'reboundChancesOffensive': 'ORBC',
+            'reboundChancesDefensive': 'DRBC',
+            'reboundChancesTotal': 'RBC',
+            'touches': 'TCHS',
+            'secondaryAssists': 'SAST',
+            'freeThrowAssists': 'FTAST',
+            'passes': 'PASS',
+            'assists': 'AST',
+            'contestedFieldGoalsMade': 'CFGM',
+            'contestedFieldGoalsAttempted': 'CFGA',
+            'contestedFieldGoalPercentage': 'CFG_PCT',
+            'uncontestedFieldGoalsMade': 'UFGM',
+            'uncontestedFieldGoalsAttempted': 'UFGA',
+            'uncontestedFieldGoalsPercentage': 'UFG_PCT',
+            'fieldGoalPercentage': 'FG_PCT',
+            'defendedAtRimFieldGoalsMade': 'DFGM',
+            'defendedAtRimFieldGoalsAttempted': 'DFGA',
+            'defendedAtRimFieldGoalPercentage': 'DFG_PCT'
+        }
+
+        df['firstName'] = df.firstName + ' ' + df.familyName
+        df = df.rename(columns=col_rename)
+        df = df[col_rename.values()]
+        return df
+    
+    @staticmethod
+    def team_tracking_rename(df):
+        col_rename = {
+            'gameId': 'GAME_ID',
+            'teamId': 'TEAM_ID',
+            'teamName': 'TEAM_NAME',
+            'teamTricode': 'TEAM_ABBREVIATION',
+            'teamCity': 'TEAM_CITY',
+            'minutes': 'MIN',
+            'distance': 'DIST',
+            'reboundChancesOffensive': 'ORBC',
+            'reboundChancesDefensive': 'DRBC',
+            'reboundChancesTotal': 'RBC',
+            'touches': 'TCHS',
+            'secondaryAssists': 'SAST',
+            'freeThrowAssists': 'FTAST',
+            'passes': 'PASS',
+            'assists': 'AST',
+            'contestedFieldGoalsMade': 'CFGM',
+            'contestedFieldGoalsAttempted': 'CFGA',
+            'contestedFieldGoalPercentage': 'CFG_PCT',
+            'uncontestedFieldGoalsMade': 'UFGM',
+            'uncontestedFieldGoalsAttempted': 'UFGA',
+            'uncontestedFieldGoalsPercentage': 'UFG_PCT',
+            'fieldGoalPercentage': 'FG_PCT',
+            'defendedAtRimFieldGoalsMade': 'DFGM',
+            'defendedAtRimFieldGoalsAttempted': 'DFGA',
+            'defendedAtRimFieldGoalPercentage': 'DFG_PCT'
+        }
+
+        df = df.rename(columns=col_rename)
+        df = df[col_rename.values()]
+        return df
+    
+    @staticmethod
+    def player_advanced_rename(df):
+        col_rename = {
+            'gameId': 'GAME_ID',
+            'teamId': 'TEAM_ID',
+            'teamTricode': 'TEAM_ABBREVIATION',
+            'firstName': 'PLAYER_NAME',
+            'teamCity': 'TEAM_CITY', 
+            'personId': 'PLAYER_ID',
+            'position': 'START_POSITION',
+            'comment': 'COMMENT',
+            'minutes': 'MIN',
+            "estimatedOffensiveRating": 'E_OFF_RATING', 
+            "offensiveRating": 'OFF_RATING', 
+            "estimatedDefensiveRating": 'E_DEF_RATING', 
+            "defensiveRating": 'DEF_RATING', 
+            "estimatedNetRating": 'E_NET_RATING', 
+            "netRating": 'NET_RATING', 
+            "assistPercentage": 'AST_PCT', 
+            "assistToTurnover": 'AST_TOV', 
+            "assistRatio": 'AST_RATIO', 
+            "offensiveReboundPercentage": 'OREB_PCT', 
+            "defensiveReboundPercentage": 'DREB_PCT', 
+            "reboundPercentage": 'REB_PCT', 
+          #  "turnoverRatio": 'TOV_RATIO', 
+            "effectiveFieldGoalPercentage": 'EFG_PCT', 
+            "trueShootingPercentage": 'TS_PCT', 
+            "usagePercentage": 'USG_PCT', 
+            "estimatedUsagePercentage": 'E_USG_PCT', 
+            "estimatedPace": 'E_PACE', 
+            "pace": 'PACE', 
+            "pacePer40": 'PACE_PER40', 
+            "possessions": 'POSS', 
+            "PIE": 'PIE'
+        }
+
+        df['firstName'] = df.firstName + ' ' + df.familyName
+        df = df.rename(columns=col_rename)
+        df = df[col_rename.values()]
+        return df
+    
+    @staticmethod
+    def team_advanced_rename(df):
+        col_rename = {
+            'gameId': 'GAME_ID',
+            'teamId': 'TEAM_ID',
+            'teamName': 'TEAM_NAME',
+            'teamTricode': 'TEAM_ABBREVIATION',
+            'teamCity': 'TEAM_CITY',
+            'minutes': 'MIN',
+            "estimatedOffensiveRating": 'E_OFF_RATING', 
+            "offensiveRating": 'OFF_RATING', 
+            "estimatedDefensiveRating": 'E_DEF_RATING', 
+            "defensiveRating": 'DEF_RATING', 
+            "estimatedNetRating": 'E_NET_RATING', 
+            "netRating": 'NET_RATING', 
+            "assistPercentage": 'AST_PCT', 
+            "assistToTurnover": 'AST_TOV', 
+            "assistRatio": 'AST_RATIO', 
+            "offensiveReboundPercentage": 'OREB_PCT', 
+            "defensiveReboundPercentage": 'DREB_PCT', 
+            "reboundPercentage": 'REB_PCT', 
+            "estimatedTeamTurnoverPercentage": 'TM_TOV_PCT', 
+         #   "turnoverRatio": 'TOV_RATIO', 
+            "effectiveFieldGoalPercentage": 'EFG_PCT', 
+            "trueShootingPercentage": 'TS_PCT', 
+            "usagePercentage": 'USG_PCT', 
+            "estimatedUsagePercentage": 'E_USG_PCT', 
+            "estimatedPace": 'E_PACE', 
+            "pace": 'PACE', 
+            "pacePer40": 'PACE_PER40', 
+            "possessions": 'POSS', 
+            "PIE": 'PIE'
+        }
+
+        df = df.rename(columns=col_rename)
+        df = df[col_rename.values()]
+        return df
+    
+    @staticmethod
+    def player_hustle_rename(df):
+        col_rename = {
+            'gameId': 'GAME_ID',
+            'teamId': 'TEAM_ID',
+            'teamTricode': 'TEAM_ABBREVIATION',
+            'firstName': 'PLAYER_NAME',
+            'teamCity': 'TEAM_CITY', 
+            'personId': 'PLAYER_ID',
+            'position': 'START_POSITION',
+            'comment': 'COMMENT',
+            'minutes': 'MINUTES',
+            "points": 'PTS', 
+            "contestedShots": 'CONTESTED_SHOTS', 
+            "contestedShots2pt": 'CONTESTED_SHOTS_2PT',
+            "contestedShots3pt": 'CONTESTED_SHOTS_3PT', 
+            "deflections": 'DEFLECTIONS', 
+            "chargesDrawn": 'CHARGES_DRAWN',
+            "screenAssists": 'SCREEN_ASSISTS',
+            "screenAssistPoints": 'SCREEN_AST_PTS',
+            "looseBallsRecoveredOffensive": 'OFF_LOOSE_BALLS_RECOVERED',
+            "looseBallsRecoveredDefensive": 'DEF_LOOSE_BALLS_RECOVERED',
+            "looseBallsRecoveredTotal": 'LOOSE_BALLS_RECOVERED',
+            "offensiveBoxOuts": 'OFF_BOXOUTS',
+            "defensiveBoxOuts": 'DEF_BOXOUTS',
+            "boxOutPlayerTeamRebounds": 'BOX_OUT_PLAYER_TEAM_REBS',
+            "boxOutPlayerRebounds": 'BOX_OUT_PLAYER_REBS',
+            "boxOuts": 'BOX_OUTS'
+        }
+
+        df['firstName'] = df.firstName + ' ' + df.familyName
+        df = df.rename(columns=col_rename)
+        df = df[col_rename.values()]
+        return df
+    
+    @staticmethod
+    def team_hustle_rename(df):
+        col_rename = {
+            'gameId': 'GAME_ID',
+            'teamId': 'TEAM_ID',
+            'teamName': 'TEAM_NAME',
+            'teamTricode': 'TEAM_ABBREVIATION',
+            'teamCity': 'TEAM_CITY',
+            'minutes': 'MINUTES',
+            "points": 'PTS',
+            "contestedShots": 'CONTESTED_SHOTS',
+            "contestedShots2pt": 'CONTESTED_SHOTS_2PT',
+            "contestedShots3pt": 'CONTESTED_SHOTS_3PT',
+            "deflections": 'DEFLECTIONS',
+            "chargesDrawn": 'CHARGES_DRAWN',
+            "screenAssists": 'SCREEN_ASSISTS',
+            "screenAssistPoints": 'SCREEN_AST_PTS',
+            "looseBallsRecoveredOffensive": 'OFF_LOOSE_BALLS_RECOVERED',
+            "looseBallsRecoveredDefensive": 'DEF_LOOSE_BALLS_RECOVERED',
+            "looseBallsRecoveredTotal": 'LOOSE_BALLS_RECOVERED',
+            "offensiveBoxOuts": 'OFF_BOXOUTS',
+            "defensiveBoxOuts": 'DEF_BOXOUTS',
+            "boxOutPlayerTeamRebounds": 'BOX_OUT_PLAYER_TEAM_REBS',
+            "boxOutPlayerRebounds": 'BOX_OUT_PLAYER_REBS',
+            "boxOuts": 'BOX_OUTS'
+        }
+
+        df = df.rename(columns=col_rename)
+        df = df[col_rename.values()]
+        return df
+    
+    @staticmethod
+    def player_usage_rename(df):
+        col_rename = {
+            'gameId': 'GAME_ID',
+            'teamId': 'TEAM_ID',
+            'teamTricode': 'TEAM_ABBREVIATION',
+            'firstName': 'PLAYER_NAME',
+            'teamCity': 'TEAM_CITY', 
+            'personId': 'PLAYER_ID',
+            'position': 'START_POSITION',
+            'comment': 'COMMENT',
+            'minutes': 'MIN',
+            "usagePercentage": 'USG_PCT',
+            "percentageFieldGoalsMade": 'PCT_FGM',
+            "percentageFieldGoalsAttempted": 'PCT_FGA',
+            "percentageThreePointersMade": 'PCT_FG3M',
+            "percentageThreePointersAttempted": 'PCT_FG3A',
+            "percentageFreeThrowsMade": 'PCT_FTM',
+            "percentageFreeThrowsAttempted": 'PCT_FTA',
+            "percentageReboundsOffensive": 'PCT_OREB',
+            "percentageReboundsDefensive": 'PCT_DREB',
+            "percentageReboundsTotal": 'PCT_REB',
+            "percentageAssists": 'PCT_AST',
+            "percentageTurnovers": 'PCT_TOV',
+            "percentageSteals": 'PCT_STL',
+            "percentageBlocks": 'PCT_BLK',
+            "percentageBlocksAllowed": 'PCT_BLKA',
+            "percentagePersonalFouls": 'PCT_PF',
+            "percentagePersonalFoulsDrawn": 'PCT_PFD',
+            "percentagePoints": 'PCT_PTS'
+        }
+
+        df['firstName'] = df.firstName + ' ' + df.familyName
+        df = df.rename(columns=col_rename)
+        df = df[col_rename.values()]
+        return df
+    
+    @staticmethod
+    def team_usage_rename(df):
+        col_rename = {
+            'gameId': 'GAME_ID',
+            'teamId': 'TEAM_ID',
+            'teamName': 'TEAM_NAME',
+            'teamTricode': 'TEAM_ABBREVIATION',
+            'teamCity': 'TEAM_CITY',
+            'minutes': 'MIN',
+            "usagePercentage": 'USG_PCT',
+            "percentageFieldGoalsMade": 'PCT_FGM',
+            "percentageFieldGoalsAttempted": 'PCT_FGA',
+            "percentageThreePointersMade": 'PCT_FG3M',
+            "percentageThreePointersAttempted": 'PCT_FG3A',
+            "percentageFreeThrowsMade": 'PCT_FTM',
+            "percentageFreeThrowsAttempted": 'PCT_FTA',
+            "percentageReboundsOffensive": 'PCT_OREB',
+            "percentageReboundsDefensive": 'PCT_DREB',
+            "percentageReboundsTotal": 'PCT_REB',
+            "percentageAssists": 'PCT_AST',
+            "percentageTurnovers": 'PCT_TOV',
+            "percentageSteals": 'PCT_STL',
+            "percentageBlocks": 'PCT_BLK',
+            "percentageBlocksAllowed": 'PCT_BLKA',
+            "percentagePersonalFouls": 'PCT_PF',
+            "percentagePersonalFoulsDrawn": 'PCT_PFD',
+            "percentagePoints": 'PCT_PTS'
+        }
+
+        df = df.rename(columns=col_rename)
+        df = df[col_rename.values()]
+        return df
+    
+    @staticmethod
+    def player_defensive_rename(df):
+        col_rename = {
+            'gameId': 'GAME_ID',
+            'teamId': 'TEAM_ID',
+            'teamTricode': 'TEAM_ABBREVIATION',
+            'firstName': 'PLAYER_NAME',
+            'teamCity': 'TEAM_CITY', 
+            'personId': 'PLAYER_ID',
+            'position': 'START_POSITION',
+            'comment': 'COMMENT',
+        }
+
+        df['firstName'] = df.firstName + ' ' + df.familyName
+        df = df.rename(columns=col_rename)
+        df = df[col_rename.values()]
+        return df
+    
 
     def pull_all_stats(self, stat_cat, game_date):
 
@@ -660,7 +990,22 @@ class NBAStats:
             'tracking_data': 'self.get_tracking_data(game_id)',
             'advanced_stats': 'self.get_advanced_stats(game_id)',
             'hustle_stats': 'self.get_hustle_stats(game_id)',
-            'usage_stats': 'self.get_usage_stats(game_id)'
+            'usage_stats': 'self.get_usage_stats(game_id)',
+            "matchupMinutes": 'matchupMinutes', 
+            "partialPossessions": 'partialPossessions', 
+            "switchesOn": 'switchesOn', 
+            "playerPoints": 'playerPoints', 
+            "defensiveRebounds": 'defensiveRebounds', 
+            "matchupAssists": 'matchupAssists', 
+            "matchupTurnovers": 'matchupTurnovers', 
+            "steals": 'steals', 
+            "blocks": 'blocks', 
+            "matchupFieldGoalsMade": 'matchupFieldGoalsMade', 
+            "matchupFieldGoalsAttempted": 'matchupFieldGoalsAttempted', 
+            "matchupFieldGoalPercentage": 'matchupFieldGoalPercentage', 
+            "matchupThreePointersMade": 'matchupThreePointersMade', 
+            "matchupThreePointersAttempted": 'matchupThreePointersAttempted', 
+            "matchupThreePointerPercentage": 'matchupThreePointerPercentage'
         }
 
         print(f'Pulling {stat_cat}')
@@ -687,23 +1032,24 @@ yesterday_date = dt.datetime.now().date()-dt.timedelta(1)
 # yesterday_date = dt.datetime(2025, 2, 13).date()
 
 box_score_players, box_score_teams = nba_stats.pull_all_stats('box_score', yesterday_date)
-time.sleep(1)
+time.sleep(10)
 tracking_players, tracking_teams = nba_stats.pull_all_stats('tracking_data', yesterday_date)
-time.sleep(1)
+time.sleep(10)
 adv_players, adv_teams = nba_stats.pull_all_stats('advanced_stats', yesterday_date)
-time.sleep(1)
+time.sleep(10)
 hustle_players, hustle_teams = nba_stats.pull_all_stats('hustle_stats', yesterday_date)
-time.sleep(1)
+time.sleep(10)
 usage_players, usage_teams = nba_stats.pull_all_stats('usage_stats', yesterday_date)
+# time.sleep(5)
+# defensive_players, _ = nba_stats.pull_all_stats('defensive_stats', yesterday_date)
 
-
-dfs = [box_score_players, tracking_players, adv_players, hustle_players, usage_players]
-tnames = ['Box_Score', 'Tracking_Data', 'Advanced_Stats', 'Hustle_Stats', 'Usage_Stats']
+dfs = [box_score_players, tracking_players, adv_players, hustle_players, usage_players]#, defensive_players]
+tnames = ['Box_Score', 'Tracking_Data', 'Advanced_Stats', 'Hustle_Stats', 'Usage_Stats']#, 'Defensive_Stats']
 for df, tname in zip(dfs, tnames):
     dm.delete_from_db('Player_Stats', tname, f"game_date='{yesterday_date}'")
     dm.write_to_db(df, 'Player_Stats', tname, 'append')
 
-dfs = [box_score_teams, tracking_teams, adv_teams, hustle_teams]
+dfs = [box_score_teams, tracking_teams, adv_teams, hustle_teams, usage_teams]
 tnames = ['Box_Score', 'Tracking_Data', 'Advanced_Stats', 'Hustle_Stats']
 for df, tname in zip(dfs, tnames):
     dm.delete_from_db('Team_Stats', tname, f"game_date='{yesterday_date}'")
@@ -717,24 +1063,6 @@ for df, tname in zip(dfs, tnames):
 # Number of miles traveled in x number of rolling days
 # add usage stats
 
-#%%
-
-nba_stats.ep.boxscoreusagev2.BoxScoreUsageV2(game_id='0022300566').get_data_frames()[0]
-
-#%%
-
-for game_date in dm.read("SELECT DISTINCT game_date FROM Box_Score", 'Player_Stats').values[1:]:
-    
-    print(game_date)
-    game_date = dt.datetime.strptime(game_date[0], '%Y-%m-%d').date()
-    usage_players, _ = nba_stats.pull_all_stats('usage_stats', game_date)
-
-    # dm.write_to_db(hustle_teams, 'Team_Stats', 'Hustle_Stats', 'append')
-    dm.write_to_db(usage_players, 'Player_Stats', 'Usage_Stats', 'append')
-    time.sleep(5)
-
-
-
 # %%
 
 
@@ -746,3 +1074,6 @@ for game_date in dm.read("SELECT DISTINCT game_date FROM Box_Score", 'Player_Sta
 #     except: df.PLAYER_NAME = df.PLAYER_NAME.apply(dc.name_clean)
 
 #     dm.write_to_db(df, 'Player_Stats', t, 'replace', True)
+
+#%%
+

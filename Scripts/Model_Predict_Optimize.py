@@ -7,8 +7,8 @@
 # dm = DataManage(db_path, timeout=200)
 
 # # If starting a new year, use this code to initiate the database
-# old_year = 2024
-# new_year = 2025
+# old_year = 2025
+# new_year = 2026
 
 # df = dm.read("SELECT * FROM Stack_Model_Predict LIMIT 0", f'Stack_Predict_{old_year}')
 # dm.write_to_db(df, f'Stack_Predict_{new_year}', 'Stack_Model_Predict', 'replace', create_backup=False)
@@ -18,6 +18,7 @@
 
 #%%
 # core packages
+
 import pandas as pd
 import numpy as np
 import os
@@ -766,9 +767,10 @@ def calc_stack_model(dbname, tablename, last_run_date, ens_vers, wt_col, decimal
     save_name = create_save_path(decimal_cut_greater, decimal_cut_less, val_greater, val_less, wt_col, include_under='', foldername='pick_choices')
     game_dates = pull_game_dates(q)
 
+    print(game_dates)
     game_dates = [d for d in game_dates if d > last_run_date]
-    num_back_days = 30
-    num_trials = 10; i=20
+    num_back_days = 60
+    num_trials = 20; i=20
     last_test_date = last_run_date
     if len(game_dates)>0:
         train_pred_all = dm.read(q, 'Simulation')
@@ -840,15 +842,15 @@ db_stack_predict_last = 'Stack_Predict_2025'
 #--------------
 
 for ens_vers in [
-    'random_kbest_matt0_brier1_include2_kfold3', 
-     'random_full_stack_matt0_brier1_include2_kfold3',
-     'random_full_stack_ind_cats_matt0_brier1_include2_kfold3'
+    'random_kbest_matt0_brier1_include3_kfold3', 
+     'random_full_stack_matt0_brier1_include3_kfold3',
+     'random_full_stack_ind_cats_matt0_brier1_include3_kfold3'
     ]:
 
     dm.delete_from_db(db_stack_predict, 'Stack_Model_Predict_Staging', f"ens_vers='{ens_vers}'", create_backup=False)
     
     last_run_date = find_last_run(ens_vers, tablename=last_run_tablename, dbname=db_stack_predict_last)
-    last_run_date = int(last_run_date)
+    last_run_date = 20250313#int(last_run_date)
     
     print('Last Run Date', last_run_date)
 
@@ -864,7 +866,7 @@ for ens_vers in [
     # Run
     #------------
 
-    # for wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less in iter_cats[:1]:
+    # for wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less in iter_cats[100:102]:
     #     calc_stack_model(db_stack_predict, save_tablename, last_run_date, ens_vers, wt_col, decimal_cut_greater, decimal_cut_less, val_greater, val_less)
 
     out = Parallel(n_jobs=16, verbose=50)(
@@ -878,9 +880,9 @@ for ens_vers in [
 #------------
 
 for ens_vers in [
-                'random_kbest_matt0_brier1_include2_kfold3', 
-                'random_full_stack_matt0_brier1_include2_kfold3',
-                'random_full_stack_ind_cats_matt0_brier1_include2_kfold3'
+                'random_kbest_matt0_brier1_include3_kfold3', 
+                'random_full_stack_matt0_brier1_include3_kfold3',
+                'random_full_stack_ind_cats_matt0_brier1_include3_kfold3'
                  ]:
     print(ens_vers)
     df = dm.read(f"SELECT * FROM Stack_Model_Predict_Staging WHERE ens_vers='{ens_vers}'", db_stack_predict)
@@ -988,9 +990,9 @@ db_stack_predict = 'Stack_Predict_2025'
 #--------------
 
 ens_vers_list = [
-                 'random_kbest_matt0_brier1_include2_kfold3', 
-                 'random_full_stack_matt0_brier1_include2_kfold3', 
-                 'random_full_stack_ind_cats_matt0_brier1_include2_kfold3'
+                 'random_kbest_matt0_brier1_include3_kfold3', 
+                 'random_full_stack_matt0_brier1_include3_kfold3', 
+                 'random_full_stack_ind_cats_matt0_brier1_include3_kfold3'
                  ]
 
 for ens_vers in ens_vers_list:
@@ -1091,62 +1093,54 @@ min_date, max_date = dm.read(f'''SELECT min(game_date), max(game_date)
                                  FROM Stack_Model_Predict_Staging
                                 ''', db_stack_predict).values[0]
 
-for i, cur_ens_vers in enumerate([
-                     'random_kbest_matt0_brier1_include2_kfold3', 
-                     'random_full_stack_matt0_brier1_include2_kfold3',
-                     'random_full_stack_ind_cats_matt0_brier1_include2_kfold3'
-                     ]):
-    staging = dm.read(f'''SELECT * 
-                        FROM Probability_Choices_Staging 
-                        WHERE ens_vers = '{cur_ens_vers}'  
-                    ''', db_results)
-    
 
-    if i==0: dm.write_to_db(staging, db_results, f'Probability_Choices_{min_date}_{max_date}', 'replace')
-    else: dm.write_to_db(staging, db_results, f'Probability_Choices_{min_date}_{max_date}', 'append')
+staging = dm.read(f'''SELECT * 
+                    FROM Probability_Choices_Staging 
+                ''', db_results)
+staging.ens_vers = staging.ens_vers.apply(lambda x: x.split('_matt0')[0])
 
-    final = dm.read(f'''SELECT * 
-                        FROM Probability_Choices
-                        WHERE ens_vers = '{cur_ens_vers}'
-                    ''', db_results)
-    orig_cols = final.columns
 
-    update_cols = {'winnings': 'winnings_add', 
-                    'last_date': 'last_date_new',
-                    'num_correct': 'num_correct_add',
-                    'num_wins': 'num_wins_add',
-                    'num_trials': 'num_trials_add'}
-    staging = staging.rename(columns=update_cols).drop(['num_correct_pct', 'num_wins_pct'], axis=1)
-    for k, v in update_cols.items(): 
-        staging[v] = staging[v].astype(float)
-        final[k] = final[k].astype(float)
+if i==0: dm.write_to_db(staging, db_results, f'Probability_Choices_{min_date}_{max_date}', 'replace')
+else: dm.write_to_db(staging, db_results, f'Probability_Choices_{min_date}_{max_date}', 'append')
 
-    merge_cols = ['start_spot', 'num_choices', 'value_cut_greater', 'value_cut_less', 'wt_col', 'decimal_cut_greater', 
-                'decimal_cut_less', 'rank_order', 'include_under', 'ens_vers', 'bet_type', 'matchup_rank', 
-                'num_matchups', 'no_combos', 'remove_threes']
+final = dm.read(f'''SELECT * 
+                    FROM Probability_Choices
+                ''', db_results)
+final.ens_vers = final.ens_vers.apply(lambda x: x.split('_matt0')[0])
+orig_cols = final.columns
 
-    for c in merge_cols:
-        staging[c] = staging[c].astype(final[c].dtypes)
+update_cols = {'winnings': 'winnings_add', 
+                'last_date': 'last_date_new',
+                'num_correct': 'num_correct_add',
+                'num_wins': 'num_wins_add',
+                'num_trials': 'num_trials_add'}
+staging = staging.rename(columns=update_cols).drop(['num_correct_pct', 'num_wins_pct'], axis=1)
+for k, v in update_cols.items(): 
+    staging[v] = staging[v].astype(float)
+    final[k] = final[k].astype(float)
 
-    final = pd.merge(final, staging, on=merge_cols, how='left')
+merge_cols = ['start_spot', 'num_choices', 'value_cut_greater', 'value_cut_less', 'wt_col', 'decimal_cut_greater', 
+            'decimal_cut_less', 'rank_order', 'include_under', 'ens_vers', 'bet_type', 'matchup_rank', 
+            'num_matchups', 'no_combos', 'remove_threes']
 
-    for k,v in update_cols.items():
-        if k!='last_date': final[k] = final[k] + final[v]
-        else: final[k] = final[v]
+for c in merge_cols:
+    staging[c] = staging[c].astype(final[c].dtypes)
 
-    final['num_correct_pct'] = (final.num_correct / ((final.num_trials*final.num_choices)+0.000001)).round(3)
-    final['num_wins_pct'] = (final.num_wins / (final.num_trials+0.000001)).round(3)
-    final = final[orig_cols]
+final = pd.merge(final, staging, on=merge_cols, how='left')
 
-    if i ==0: create_backup = True
-    else: create_backup = False
-    
-    dm.delete_from_db(db_results, 'Probability_Choices', f"ens_vers = '{cur_ens_vers}'", create_backup)
-    dm.write_to_db(final, db_results, 'Probability_Choices', 'append', create_backup=False)
+for k,v in update_cols.items():
+    if k!='last_date': final[k] = final[k] + final[v]
+    else: final[k] = final[v]
 
-    del final
-    del staging
-    gc.collect()
+final['num_correct_pct'] = (final.num_correct / ((final.num_trials*final.num_choices)+0.000001)).round(3)
+final['num_wins_pct'] = (final.num_wins / (final.num_trials+0.000001)).round(3)
+final = final[orig_cols]
+
+dm.write_to_db(final, db_results, 'Probability_Choices', 'replace', create_backup=True)
+
+del final
+del staging
+gc.collect()
 
 #%%
 
@@ -1291,16 +1285,16 @@ pred['num_correct_pct_comb'] = (pred.num_correct_pct_pred + pred.num_correct_pct
 import pprint
 best_results = {}
 
-for i, ens_v in enumerate(['random_kbest_matt0_brier1_include2_kfold3',
-                            'random_full_stack_matt0_brier1_include2_kfold3', 
-                            'random_full_stack_ind_cats_matt0_brier1_include2_kfold3']):
+for i, ens_v in enumerate(['random_kbest',
+                            'random_full_stack', 
+                            'random_full_stack_ind_cats']):
 
     print('=============\n', ens_v, '\n=============')
     
     best_sgp_10 = (
         pred[
              (pred.ens_vers==ens_v) & 
-             (pred.win_pct_comb > 0.1) & 
+             (pred.win_pct_comb > 0.12) & 
              (pred.num_choices >= 4) &
              (pred.num_matchups==1)
              ]).sort_values(by='winnings_pred_comb', ascending=False).head(5)
@@ -1309,8 +1303,8 @@ for i, ens_v in enumerate(['random_kbest_matt0_brier1_include2_kfold3',
     best_sgp_15 = (
         pred[
              (pred.ens_vers==ens_v) & 
-             (pred.win_pct_comb > 0.15) &
-             (pred.num_choices >= 4) &
+             (pred.win_pct_comb > 0.18) &
+             (pred.num_choices >= 3) &
              (pred.num_matchups==1)
              ]).sort_values(by='winnings_pred_comb', ascending=False).head(5)
     display(best_sgp_15) 
@@ -1318,7 +1312,7 @@ for i, ens_v in enumerate(['random_kbest_matt0_brier1_include2_kfold3',
     best_overall_10 = (
         pred[
              (pred.ens_vers==ens_v) & 
-             (pred.win_pct_comb > 0.10) & 
+             (pred.win_pct_comb > 0.12) & 
              (pred.num_choices >= 4)
              ]).sort_values(by='winnings_pred_comb', ascending=False).head(5)
     display(best_overall_10) 
@@ -1326,22 +1320,22 @@ for i, ens_v in enumerate(['random_kbest_matt0_brier1_include2_kfold3',
     best_overall_15 = (
         pred[
              (pred.ens_vers==ens_v) & 
-             (pred.win_pct_comb > 0.15) &
-             (pred.num_choices >= 4)
+             (pred.win_pct_comb > 0.18) &
+             (pred.num_choices >= 3)
              ]).sort_values(by='winnings_pred_comb', ascending=False).head(5)
     display(best_overall_15) 
 
     
-    save_out = pd.DataFrame(best_sgp_10.iloc[0]).T.assign(label = 'min_10%_sgp', date_run = pd.to_datetime('today').strftime('%Y-%m-%d'))
+    save_out = pd.DataFrame(best_sgp_10.iloc[0]).T.assign(label = 'min_12%_sgp', date_run = pd.to_datetime('today').strftime('%Y-%m-%d'))
     
     best_overall_10 = best_overall_10[best_overall_10.index.isin(save_out.index)==False]
-    save_out = pd.concat([save_out, pd.DataFrame(best_overall_10.iloc[0]).T.assign(label = 'min_10%', date_run = pd.to_datetime('today').strftime('%Y-%m-%d'))])
+    save_out = pd.concat([save_out, pd.DataFrame(best_overall_10.iloc[0]).T.assign(label = 'min_12%', date_run = pd.to_datetime('today').strftime('%Y-%m-%d'))])
     
     best_sgp_15 = best_sgp_15[best_sgp_15.index.isin(save_out.index)==False]
-    save_out = pd.concat([save_out, pd.DataFrame(best_sgp_15.iloc[0]).T.assign(label = 'min_15%_sgp', date_run = pd.to_datetime('today').strftime('%Y-%m-%d'))])
+    save_out = pd.concat([save_out, pd.DataFrame(best_sgp_15.iloc[0]).T.assign(label = 'min_18%_sgp', date_run = pd.to_datetime('today').strftime('%Y-%m-%d'))])
     
     best_overall_15 = best_overall_15[best_overall_15.index.isin(save_out.index)==False]
-    save_out = pd.concat([save_out, pd.DataFrame(best_overall_15.iloc[0]).T.assign(label = 'min_15%', date_run = pd.to_datetime('today').strftime('%Y-%m-%d'))])
+    save_out = pd.concat([save_out, pd.DataFrame(best_overall_15.iloc[0]).T.assign(label = 'min_18%', date_run = pd.to_datetime('today').strftime('%Y-%m-%d'))])
   #  save_out = pd.concat([save_out, pd.DataFrame(best_high_win_actual.iloc[0]).T.assign(label = 'min_25%_actual', date_run = pd.to_datetime('today').strftime('%Y-%m-%d'))])
 
     save_out = save_out.drop_duplicates()

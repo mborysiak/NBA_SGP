@@ -1072,7 +1072,7 @@ def get_final_features(all_reg_features, all_class_features, class_min=6, reg_mi
 
 #%%
 
-train_date = '2025-03-13'
+train_date = '2025-10-23'
 max_date = dm.read("SELECT max(game_date) FROM FantasyData", 'Player_Stats').values[0][0]
 
 df = fantasy_data()
@@ -1142,7 +1142,6 @@ df = add_y_act(df, box_score)
 df = df.dropna(axis=0, subset=[c for c in df.columns if 'y_act' not in c]).reset_index(drop=True)
 train_date = train_date.replace('-', '')
 
-#%%
 print(df.shape)
 print(df.game_date.max())
 
@@ -1153,9 +1152,6 @@ if final_cols is None:
 
 print('Number of features:', len(final_cols))
 
-#%%
-
-# final_cols = get_final_features(all_reg_features, all_class_features, class_min=6, reg_min=7, remaining_min=8)
 
 #%%
 
